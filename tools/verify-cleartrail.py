@@ -109,8 +109,16 @@ def main():
         image = "system-images;android-30;aosp_atd;x86_64"
         command([sdkmanager, "emulator", image], "sdk.log", timeout=300)
         avd = "cleartrail-" + args.run_name
+        avd_home = Path(env["ANDROID_AVD_HOME"])
+        avd_home.mkdir()
+        Path(env["ANDROID_EMULATOR_HOME"]).mkdir()
         command([avdmanager, "create", "avd", "--name", avd, "--package", image, "--device", "pixel_4"],
                 "avd.log", input_text="no\n")
+        avd_index = avd_home / (avd + ".ini")
+        assert avd_index.is_file(), "AVD manager did not create the index in the owned directory."
+        (run / "avd-index.txt").write_bytes(avd_index.read_bytes())
+        command([sdk / "emulator" / "emulator", "-list-avds"], "avd-list.log", timeout=30)
+        assert avd in (run / "avd-list.log").read_text(encoding="utf-8").splitlines(), "Emulator cannot discover the owned AVD."
         emulator = subprocess.Popen([str(sdk / "emulator" / "emulator"), "-avd", avd, "-port", "5580",
                                      "-no-window", "-no-audio", "-no-snapshot", "-gpu", "swiftshader_indirect",
                                      "-camera-back", "none", "-camera-front", "none", "-memory", "2048",
