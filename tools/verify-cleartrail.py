@@ -41,6 +41,7 @@ def main():
     env = dict(os.environ, ANDROID_AVD_HOME=str(run / "avd"), ANDROID_EMULATOR_HOME=str(run / "emulator-home"))
 
     def command(argv, log_name, timeout=1200, input_text=""):
+        print("RUN " + " ".join(str(part) for part in argv), flush=True)
         with (run / log_name).open("ab") as log:
             subprocess.run([str(part) for part in argv], cwd=ROOT, env=env,
                            input=input_text.encode(), stdout=log, stderr=subprocess.STDOUT,
@@ -58,9 +59,16 @@ def main():
         avdmanager = sdk / "cmdline-tools" / "latest" / "bin" / "avdmanager"
         assert sdkmanager.is_file() and avdmanager.is_file(), "Preinstalled Android command-line tools required."
         command(["java", "-version"], "doctor.log", timeout=15)
+        command(["free", "-m"], "doctor.log", timeout=15)
         accelerated = os.access("/dev/kvm", os.R_OK | os.W_OK)
         result["actions"].append({"action": "doctor", "compileSdk": 36, "kvmAccessible": accelerated})
-        command(["./gradlew", ":app:assembleDemoDebug", ":app:assembleDemoDebugAndroidTest", "--console=plain", "--no-daemon"],
+        gradle_options = [
+            "--console=plain", "--no-daemon", "--max-workers=2",
+            "-Dorg.gradle.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError -Xmx6g -Xms512m",
+            "-Pkotlin.daemon.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=320m -Xmx2g -Xms256m",
+        ]
+        result["actions"].append({"action": "build-memory-budget", "gradleHeapGiB": 6, "kotlinHeapGiB": 2, "maxWorkers": 2})
+        command(["./gradlew", ":app:assembleDemoDebug", ":app:assembleDemoDebugAndroidTest", *gradle_options],
                 "build.log", timeout=1800)
         result["actions"].append({"action": "build", "variant": "demoDebug"})
         image = "system-images;android-30;aosp_atd;x86_64"
@@ -111,7 +119,7 @@ def main():
         test_class = "com.google.samples.apps.nowinandroid.ui.NavigationTest"
         command(["./gradlew", ":app:connectedDemoDebugAndroidTest",
                  "-Pandroid.testInstrumentationRunnerArguments.class=" + test_class,
-                 "--console=plain", "--no-daemon"], "instrumentation.log", timeout=900)
+                 *gradle_options], "instrumentation.log", timeout=900)
         result["actions"].append({"action": "native-navigation-tests", "class": test_class})
         result["nativeAcceptance"] = True
     except BaseException as error:

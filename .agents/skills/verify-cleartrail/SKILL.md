@@ -32,3 +32,6 @@ The driver retains `result.json`, emulator/build/instrumentation logs, the actua
 The driver terminates only its own emulator process group and checks its console port closed. The isolated AVD/profile and all evidence remain in the run directory until the hosted job's normal teardown. It never kills a pre-existing emulator, rewrites device permissions or deletes user profiles. Confirm cleanup in the retained result and that the screenshot survives cleanup.
 
 See [the feature map](features/README.md). If SDK, licenses, acceleration or boot are blocked, preserve the precise failed stage and keep this skill a draft while continuing independent authorized work.
+
+Hosted memory setup: the driver records available memory and uses a 6 GiB Gradle heap, a 2 GiB Kotlin heap and two workers. The original combined build produced the application APK but failed dexing the test APK with Java heap exhaustion on run 39507012126. This budget remains unproved until the same build completes; no checks are disabled.
+
