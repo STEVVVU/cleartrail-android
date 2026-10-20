@@ -47,3 +47,8 @@ captures/
 
 # Kotlin
 .kotlin
+
+# Cleartrail local verification output
+.audit/
+__pycache__/
+*.pyc
