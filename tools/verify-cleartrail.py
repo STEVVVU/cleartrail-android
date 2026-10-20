@@ -98,11 +98,11 @@ def main():
         accelerated = os.access("/dev/kvm", os.R_OK | os.W_OK)
         result["actions"].append({"action": "doctor", "compileSdk": 36, "kvmAccessible": accelerated})
         gradle_options = [
-            "--console=plain", "--no-daemon", "--max-workers=2",
+            "--console=plain", "--no-daemon", "--max-workers=3",
             "-Dorg.gradle.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError -Xmx6g -Xms512m",
             "-Pkotlin.daemon.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=320m -Xmx2g -Xms256m",
         ]
-        result["actions"].append({"action": "build-memory-budget", "gradleHeapGiB": 6, "kotlinHeapGiB": 2, "maxWorkers": 2})
+        result["actions"].append({"action": "build-memory-budget", "gradleHeapGiB": 6, "kotlinHeapGiB": 2, "maxWorkers": 3})
         command(["./gradlew", ":app:assembleDemoDebug", ":app:assembleDemoDebugAndroidTest", *gradle_options],
                 "build.log", timeout=1800)
         result["actions"].append({"action": "build", "variant": "demoDebug"})
