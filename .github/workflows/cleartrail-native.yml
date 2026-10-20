@@ -12,8 +12,6 @@ jobs:
   native-baseline:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    env:
-      GRADLE_USER_HOME: ${{ runner.temp }}/cleartrail-gradle
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v5
@@ -29,6 +27,8 @@ jobs:
           test -x "$ANDROID_HOME/platform-tools/adb"
           ls -l /dev/kvm || true
       - name: Build and verify the real native app
+        env:
+          GRADLE_USER_HOME: ${{ runner.temp }}/cleartrail-gradle
         run: python tools/verify-cleartrail.py ci-${{ github.run_id }}
       - uses: actions/upload-artifact@v4
         if: always()
