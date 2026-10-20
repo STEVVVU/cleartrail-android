@@ -40,12 +40,47 @@ def main():
     emulator_log = (run / "emulator.log").open("wb")
     env = dict(os.environ, ANDROID_AVD_HOME=str(run / "avd"), ANDROID_EMULATOR_HOME=str(run / "emulator-home"))
 
+    def gradle_diagnostics():
+        listing = subprocess.check_output(["jcmd", "-l"], env=env, timeout=15).decode()
+        for line in listing.splitlines():
+            if "org.gradle.launcher.daemon.bootstrap.GradleDaemon" not in line:
+                continue
+            pid = line.split()[0]
+            with (run / ("gradle-thread-" + pid + ".log")).open("wb") as diagnostic:
+                subprocess.run(["jcmd", pid, "Thread.print", "-l"], env=env, stdout=diagnostic,
+                               stderr=subprocess.STDOUT, timeout=20, check=True)
+            dump = (run / ("gradle-thread-" + pid + ".log")).read_text(encoding="utf-8", errors="replace")
+            print("GRADLE THREAD DIAGNOSTIC\n" + dump[:24_000], flush=True)
+
     def command(argv, log_name, timeout=1200, input_text=""):
-        print("RUN " + " ".join(str(part) for part in argv), flush=True)
+        arguments = [str(part) for part in argv]
+        print("RUN " + " ".join(arguments), flush=True)
+        deadline = time.monotonic() + timeout
+        progress_count = 0
         with (run / log_name).open("ab") as log:
-            subprocess.run([str(part) for part in argv], cwd=ROOT, env=env,
-                           input=input_text.encode(), stdout=log, stderr=subprocess.STDOUT,
-                           timeout=timeout, check=True)
+            process = subprocess.Popen(arguments, cwd=ROOT, env=env, stdin=subprocess.PIPE,
+                                       stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+            try:
+                process.stdin.write(input_text.encode())
+                process.stdin.close()
+                while process.poll() is None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(arguments, timeout)
+                    try:
+                        process.wait(timeout=min(60, remaining))
+                    except subprocess.TimeoutExpired:
+                        progress_count += 1
+                        tail = (run / log_name).read_text(encoding="utf-8", errors="replace").splitlines()[-3:]
+                        print("PROGRESS " + log_name + "\n" + "\n".join(tail), flush=True)
+                        if log_name == "build.log" and progress_count == 2:
+                            gradle_diagnostics()
+                if process.returncode:
+                    raise subprocess.CalledProcessError(process.returncode, arguments)
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait(timeout=10)
 
     def adb(*arguments, timeout=15):
         return subprocess.run([str(sdk / "platform-tools" / "adb"), "-s", "emulator-5580", *arguments],
@@ -126,18 +161,25 @@ def main():
         result["error"] = str(error)
         raise
     finally:
+        result["cleanup"] = {"emulatorStopped": False, "evidenceRetained": run.exists()}
         try:
             if emulator is not None and emulator.poll() is None:
                 os.killpg(emulator.pid, signal.SIGTERM)
-                emulator.wait(timeout=30)
+                try:
+                    emulator.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    os.killpg(emulator.pid, signal.SIGKILL)
+                    emulator.wait(timeout=10)
             deadline = time.monotonic() + 10
             while listening(5580) and time.monotonic() < deadline:
                 time.sleep(0.1)
-            result["cleanup"] = {"emulatorStopped": not listening(5580), "evidenceRetained": True}
+            result["cleanup"]["emulatorStopped"] = not listening(5580) and (emulator is None or emulator.poll() is not None)
         finally:
             emulator_log.close()
             (run / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             print("EVIDENCE " + str(run / "result.json"), flush=True)
+        if not result["cleanup"]["emulatorStopped"]:
+            raise RuntimeError("Owned emulator did not stop. Inspect result.json and emulator.log.")
 
 
 if __name__ == "__main__":

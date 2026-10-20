@@ -35,3 +35,4 @@ See [the feature map](features/README.md). If SDK, licenses, acceleration or boo
 
 Hosted memory setup: the driver records available memory and uses a 6 GiB Gradle heap, a 2 GiB Kotlin heap and two workers. The original combined build produced the application APK but failed dexing the test APK with Java heap exhaustion on run 39507012126. This budget remains unproved until the same build completes; no checks are disabled.
 
+Configuration timeout39508607286: the same build did not reach any compile task in30minutes; only task-graph/type-safe accessor messages appeared. This is a distinct unresolved failure, not proof the6GiB budget is wrong or sufficient. The driver now emits live phase tails, takes a bounded Gradle daemon thread dump after two minutes and stops its own command process group on timeout. Heap/workers remain unchanged for that diagnostic reproduction.
