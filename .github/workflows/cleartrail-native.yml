@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   native-baseline:
-    runs-on: ubuntu-24.04
+    runs-on: macos-26-intel
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -25,7 +25,7 @@ jobs:
         run: |
           test -d "$ANDROID_HOME/platforms/android-36"
           test -x "$ANDROID_HOME/platform-tools/adb"
-          ls -l /dev/kvm || true
+          test -x "$ANDROID_HOME/emulator/emulator"
       - name: Build and verify the real native app
         env:
           GRADLE_USER_HOME: ${{ runner.temp }}/cleartrail-gradle

@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import signal
@@ -26,8 +27,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("run_name")
     args = parser.parse_args()
-    if os.environ.get("GITHUB_ACTIONS") != "true" or os.name != "posix":
-        parser.error("Native driving requires the dedicated Linux hosted workflow. No local SDK/device is configured.")
+    if os.environ.get("GITHUB_ACTIONS") != "true" or platform.system() not in ("Linux", "Darwin") or platform.machine() != "x86_64":
+        parser.error("Use the dedicated x86_64 Linux/Intel macOS hosted workflow. No local SDK/device is configured.")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", args.run_name):
         parser.error("Use a short alphanumeric run name.")
     if listening(5580) or listening(5581):
@@ -94,9 +95,12 @@ def main():
         avdmanager = sdk / "cmdline-tools" / "latest" / "bin" / "avdmanager"
         assert sdkmanager.is_file() and avdmanager.is_file(), "Preinstalled Android command-line tools required."
         command(["java", "-version"], "doctor.log", timeout=15)
-        command(["free", "-m"], "doctor.log", timeout=15)
-        accelerated = os.access("/dev/kvm", os.R_OK | os.W_OK)
-        result["actions"].append({"action": "doctor", "compileSdk": 36, "kvmAccessible": accelerated})
+        memory_command = ["free", "-m"] if platform.system() == "Linux" else ["sysctl", "hw.memsize"]
+        command(memory_command, "doctor.log", timeout=15)
+        assert (sdk / "emulator" / "emulator").is_file(), "Preinstalled emulator required for the acceleration preflight."
+        command([sdk / "emulator" / "emulator", "-accel-check"], "acceleration.log", timeout=30)
+        result["actions"].append({"action": "doctor", "compileSdk": 36, "platform": platform.system(),
+                                  "architecture": platform.machine(), "accelerationPreflightPassed": True})
         gradle_options = [
             "--console=plain", "--no-daemon", "--max-workers=3",
             "-Dorg.gradle.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError -Xmx6g -Xms512m",
@@ -122,19 +126,24 @@ def main():
         emulator = subprocess.Popen([str(sdk / "emulator" / "emulator"), "-avd", avd, "-port", "5580",
                                      "-no-window", "-no-audio", "-no-snapshot", "-gpu", "swiftshader_indirect",
                                      "-camera-back", "none", "-camera-front", "none", "-memory", "2048",
-                                     "-accel", "on" if accelerated else "off"],
+                                     "-accel", "on"],
                                     env=env, cwd=ROOT, stdout=emulator_log, stderr=subprocess.STDOUT,
                                     start_new_session=True)
-        result["actions"].append({"action": "launch-emulator", "pid": emulator.pid, "accelerated": accelerated})
+        result["actions"].append({"action": "launch-emulator", "pid": emulator.pid, "accelerated": True})
         deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
             if emulator.poll() is not None:
                 raise RuntimeError("Owned emulator exited. Inspect emulator.log.")
             try:
-                if adb("shell", "getprop", "sys.boot_completed").strip() == b"1" and b"package:" in adb("shell", "pm", "path", "android"):
+                completed = adb("shell", "getprop", "sys.boot_completed").strip()
+                package = adb("shell", "pm", "path", "android") if completed == b"1" else b""
+                (run / "boot-probe.json").write_text(json.dumps({"completed": completed.decode(errors="replace"),
+                                                                "package": package.decode(errors="replace")}), encoding="utf-8")
+                if completed == b"1" and b"package:" in package:
                     break
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                pass
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                (run / "boot-probe.json").write_text(json.dumps({"error": str(error),
+                                                                "stderr": str(getattr(error, "stderr", b""))[:4000]}), encoding="utf-8")
             time.sleep(0.5)
         else:
             raise TimeoutError("Owned emulator did not complete boot within 300 seconds.")
