@@ -4,6 +4,11 @@ on:
   push:
     branches: [cleartrail]
   workflow_dispatch:
+    inputs:
+      native:
+        description: Drive optional emulator acceptance after building
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -39,10 +44,12 @@ jobs:
           name: cleartrail-build-evidence
           path: |
             .audit/verification/*/*.json
+            .audit/verification/*/*.jsonl
             .audit/verification/*/*.log
           retention-days: 7
 
   native-baseline:
+    if: github.event_name == 'workflow_dispatch' && inputs.native
     needs: build
     runs-on: macos-26-intel
     timeout-minutes: 40
@@ -67,6 +74,7 @@ jobs:
           name: cleartrail-native-evidence
           path: |
             .audit/verification/*/*.json
+            .audit/verification/*/*.jsonl
             .audit/verification/*/*.log
             .audit/verification/*/*.txt
             .audit/verification/*/*.xml

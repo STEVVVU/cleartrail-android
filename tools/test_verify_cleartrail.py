@@ -27,6 +27,12 @@ class ArtifactBoundaryTests(unittest.TestCase):
     def test_same_commit_and_exact_bytes_are_accepted(self):
         self.assertEqual(verifier.validated_apks(self.artifacts, self.source)["sourceCommit"], self.source)
 
+    def test_json_records_append_without_replacing_prior_evidence(self):
+        path = self.root / "events.jsonl"
+        verifier.append_json_record(path, {"event": "started"})
+        verifier.append_json_record(path, {"event": "completed"})
+        self.assertEqual([json.loads(line)["event"] for line in path.read_text().splitlines()], ["started", "completed"])
+
     def test_foreign_commit_is_rejected(self):
         with self.assertRaises(ValueError):
             verifier.validated_apks(self.artifacts, "b" * 40)
@@ -53,6 +59,24 @@ class ArtifactBoundaryTests(unittest.TestCase):
         value = json.loads(path.read_text(encoding="utf-8"))
         update(value)
         path.write_text(json.dumps(value), encoding="utf-8")
+
+
+class ProcessInputTests(unittest.TestCase):
+    def test_stdin_closes_even_when_write_fails(self):
+        class FailingInput:
+            closed = False
+
+            def write(self, _value):
+                raise BrokenPipeError("child closed stdin")
+
+            def close(self):
+                self.closed = True
+
+        process = type("Process", (), {})()
+        process.stdin = FailingInput()
+        with self.assertRaises(BrokenPipeError):
+            verifier.write_and_close_stdin(process, "no\n")
+        self.assertTrue(process.stdin.closed)
 
 
 class InstrumentationBoundaryTests(unittest.TestCase):

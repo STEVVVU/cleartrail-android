@@ -1,6 +1,7 @@
 """Hosted native Android verification; no UI automation on the user's computer."""
 
 import argparse
+import faulthandler
 import hashlib
 import json
 import os
@@ -18,6 +19,19 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.google.samples.apps.nowinandroid.demo.debug"
 TEST_CLASS = "com.google.samples.apps.nowinandroid.ui.NavigationTest"
 TEST_RUNNER = PACKAGE + ".test/com.google.samples.apps.nowinandroid.core.testing.NiaTestRunner"
+
+
+def append_json_record(path, record):
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record) + "\n")
+        stream.flush()
+
+
+def write_and_close_stdin(process, input_text):
+    try:
+        process.stdin.write(input_text.encode())
+    finally:
+        process.stdin.close()
 
 
 def package_apks(destination, source_commit, files):
@@ -82,6 +96,8 @@ def main():
     result = {"run": args.run_name, "stage": args.mode, "actions": [], "nativeAcceptance": False}
     emulator = None
     emulator_log = (run / "emulator.log").open("wb")
+    stack_log = (run / "python-stacks.log").open("a", encoding="utf-8")
+    faulthandler.dump_traceback_later(60, repeat=True, file=stack_log)
     env = dict(os.environ, ANDROID_AVD_HOME=str(run / "avd"), ANDROID_EMULATOR_HOME=str(run / "emulator-home"))
 
     def gradle_diagnostics():
@@ -98,15 +114,24 @@ def main():
 
     def command(argv, log_name, timeout=1200, input_text=""):
         arguments = [str(part) for part in argv]
-        print("RUN " + " ".join(arguments), flush=True)
         deadline = time.monotonic() + timeout
         progress_count = 0
+        command_id = str(time.time_ns())
+        append_json_record(run / "command-events.jsonl", {
+            "id": command_id, "event": "started", "log": log_name,
+            "argv": arguments, "timeoutSeconds": timeout, "elapsedSeconds": 0,
+        })
+        print("RUN " + " ".join(arguments), flush=True)
+        process = None
         with (run / log_name).open("ab") as log:
-            process = subprocess.Popen(arguments, cwd=ROOT, env=env, stdin=subprocess.PIPE,
-                                       stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
             try:
-                process.stdin.write(input_text.encode())
-                process.stdin.close()
+                process = subprocess.Popen(arguments, cwd=ROOT, env=env, stdin=subprocess.PIPE,
+                                           stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+                append_json_record(run / "command-events.jsonl", {
+                    "id": command_id, "event": "spawned", "pid": process.pid,
+                    "elapsedSeconds": round(time.monotonic() - (deadline - timeout), 3),
+                })
+                write_and_close_stdin(process, input_text)
                 while process.poll() is None:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
@@ -121,8 +146,18 @@ def main():
                             gradle_diagnostics()
                 if process.returncode:
                     raise subprocess.CalledProcessError(process.returncode, arguments)
+                append_json_record(run / "command-events.jsonl", {
+                    "id": command_id, "event": "completed", "returncode": process.returncode,
+                    "elapsedSeconds": round(time.monotonic() - (deadline - timeout), 3),
+                })
+            except BaseException as error:
+                append_json_record(run / "command-events.jsonl", {
+                    "id": command_id, "event": "failed", "error": str(error),
+                    "elapsedSeconds": round(time.monotonic() - (deadline - timeout), 3),
+                })
+                raise
             finally:
-                if process.poll() is None:
+                if process is not None and process.poll() is None:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait(timeout=10)
 
@@ -188,20 +223,32 @@ def main():
         result["actions"].append({"action": "launch-emulator", "pid": emulator.pid, "accelerated": True})
         boot_started = time.monotonic()
         deadline = boot_started + 900
+        boot_path = run / "boot-probes.jsonl"
         while time.monotonic() < deadline:
             if emulator.poll() is not None:
                 raise RuntimeError("Owned emulator exited. Inspect emulator.log.")
             try:
+                probe_started = time.monotonic()
+                append_json_record(boot_path, {"event": "started", "elapsedSeconds": round(probe_started - boot_started, 3),
+                                               "call": "getprop sys.boot_completed"})
                 completed = adb("shell", "getprop", "sys.boot_completed").strip()
-                package = adb("shell", "pm", "path", "android") if completed == b"1" else b""
-                (run / "boot-probe.json").write_text(json.dumps({"elapsedSeconds": round(time.monotonic() - boot_started, 3),
-                                                                "deadlineSeconds": 900, "completed": completed.decode(errors="replace"),
-                                                                "package": package.decode(errors="replace")}), encoding="utf-8")
+                append_json_record(boot_path, {"event": "completed", "elapsedSeconds": round(time.monotonic() - boot_started, 3),
+                                               "call": "getprop sys.boot_completed", "output": completed.decode(errors="replace")})
+                package = b""
+                if completed == b"1":
+                    append_json_record(boot_path, {"event": "started", "elapsedSeconds": round(time.monotonic() - boot_started, 3),
+                                                   "call": "pm path android"})
+                    package = adb("shell", "pm", "path", "android")
+                    append_json_record(boot_path, {"event": "completed", "elapsedSeconds": round(time.monotonic() - boot_started, 3),
+                                                   "call": "pm path android", "output": package.decode(errors="replace")})
+                append_json_record(boot_path, {"event": "state", "elapsedSeconds": round(time.monotonic() - boot_started, 3),
+                                               "deadlineSeconds": 900, "completed": completed.decode(errors="replace"),
+                                               "packageReady": b"package:" in package})
                 if completed == b"1" and b"package:" in package:
                     break
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
-                (run / "boot-probe.json").write_text(json.dumps({"error": str(error),
-                                                                "stderr": str(getattr(error, "stderr", b""))[:4000]}), encoding="utf-8")
+                append_json_record(boot_path, {"event": "failed", "elapsedSeconds": round(time.monotonic() - boot_started, 3),
+                                               "error": str(error), "stderr": str(getattr(error, "stderr", b""))[:4000]})
             time.sleep(0.5)
         else:
             raise TimeoutError("Owned emulator did not complete boot within 900 seconds.")
@@ -284,6 +331,8 @@ def main():
                 time.sleep(0.1)
             result["cleanup"]["emulatorStopped"] = not listening(5580) and (emulator is None or emulator.poll() is not None)
         finally:
+            faulthandler.cancel_dump_traceback_later()
+            stack_log.close()
             emulator_log.close()
             (run / "result.json").write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             print("EVIDENCE " + str(run / "result.json"), flush=True)

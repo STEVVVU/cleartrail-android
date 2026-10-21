@@ -60,3 +60,5 @@ The app and Android libraries have two product flavors: `demo` and `prod`, and t
 ## Cleartrail verification
 
 Use `.agents/skills/verify-cleartrail/SKILL.md` for this fork's hosted native acceptance. The maintained Python driver has separate `--mode build` and `--mode native --apk-dir <same-run-artifact>` phases. Native device operations run only on the dedicated hosted emulator. Local boundary checks use `python -m unittest discover -s tools -p test_verify_cleartrail.py`; they do not prove app behavior.
+
+The user prioritized code delivery over connecting or driving devices. Push CI keeps builds and focused tests; emulator acceptance is optional with workflow dispatch `native=true`. Implement original code with source/build checks and keep unexecuted native paths explicitly unverified. Do not weaken their assertions or label a skipped emulator job as passed.

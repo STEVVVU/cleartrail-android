@@ -5,6 +5,8 @@ description: Build the real demo Android APKs, validate their transfer, drive an
 
 # Verify Cleartrail
 
+The user's current delivery scope prioritizes code, builds and focused tests. Push CI runs the build and deterministic boundaries. The emulator job is optional through workflow dispatch with `native=true`. A skipped emulator job never establishes native UI or document-provider acceptance. Original feature implementation may proceed with source/build verification while those checks remain explicitly unverified.
+
 Status: draft. Both APKs and emulator boot have been observed, but normal navigation and the existing instrumentation class have not passed together. The Windows workspace has no configured Android SDK or emulator.
 
 ## Launch
@@ -25,7 +27,7 @@ The workflow transfers `app.apk`, `tests.apk` and `manifest.json` through the of
 
 Record Java, SDK, available memory, source hashes, emulator version and acceleration preflight. Build only `demoDebug` and its native test APK using a 6 GiB Gradle heap, 2 GiB Kotlin heap and three workers. Never autoaccept SDK licenses, change KVM permissions or install a hypervisor. Refuse occupied emulator ports and existing evidence directories.
 
-Create the owned AVD directories and require its index and emulator discovery. Check acceleration after SDK installation and bound actual guest boot/package readiness to 900 seconds, retaining elapsed time. Record the real `CREATE_DOCUMENT` resolver result in `document-picker.json`; its availability is a prerequisite for a future document-export feature, not a baseline requirement.
+Create the owned AVD directories and require its index and emulator discovery. Check acceleration after SDK installation and bound actual guest boot/package readiness to 900 seconds, retaining elapsed time. `command-events.jsonl` records flushed start, spawn, completion or failure events for each subprocess; repeated Python stack snapshots go to `python-stacks.log`. The append-only `boot-probes.jsonl` records each started and completed adb call plus readiness state, so a truncated hosted job identifies its last completed call. These diagnostics do not extend command or job deadlines. Record the real `CREATE_DOCUMENT` resolver result in `document-picker.json`; its availability is a prerequisite for a future document-export feature, not a baseline requirement.
 
 ## Drive
 
@@ -39,7 +41,7 @@ Do not substitute Robolectric snapshots for emulator execution or infer iOS cove
 
 ## Evidence
 
-Keep generated data under ignored `.audit/verification/<run>/`. The build phase retains its result, Gradle logs and staged APK manifest. The native phase retains validation results, launch output, hierarchy, screenshot, instrumentation output, emulator logs and bounded failure probes. CI uploads evidence separately from APKs. Download and inspect the actual PNG before accepting the UI. Keep maintained drivers separate from generated evidence. Upstream screenshot baselines remain CI-generated.
+Keep generated data under ignored `.audit/verification/<run>/`. The build phase retains its result, Gradle logs and staged APK manifest. The native phase retains validation results, launch output, hierarchy, screenshot, instrumentation output, emulator logs, command lifecycle records, Python stack snapshots, append-only boot probes and bounded failure probes. CI uploads evidence separately from APKs. Download and inspect the actual PNG before accepting the UI. Keep maintained drivers separate from generated evidence. Upstream screenshot baselines remain CI-generated.
 
 ## Cleanup
 
@@ -54,3 +56,5 @@ See [the feature map](features/README.md). A missing SDK license, failed acceler
 [Run 39519290354](https://github.com/STEVVVU/cleartrail-android/actions/runs/39519290354) booted the guest, built both APKs and installed the app. `am start -W` returned `Status: timeout` while the retained PNG showed the splash screen. The driver aborted before its own UI-readiness gate. No completed navigation or instrumentation is claimed. Cleanup and evidence retention passed. The separate build/native workflow and non-waiting launch are corrections awaiting hosted proof. No original Kotlin product feature has been added.
 
 [Run 39524380971](https://github.com/STEVVVU/cleartrail-android/actions/runs/39524380971) passed both APK builds, artifact transfer and exact source/hash validation. Its accelerated Intel guest did not complete boot within 300 seconds. Retained logs show one virtual CPU, a live system_server and slow package parsing rather than an observed guest panic. Cleanup passed. The emulator's [upstream macOS code](https://android.googlesource.com/platform/external/qemu/+/emu-master-dev/android-qemu2-glue/main.cpp) forces one guest CPU on hosts with fewer than six logical cores, so adding a cores flag is not assumed to override it. The next bounded probe allows 900 seconds with the same image and required boot/package predicates. This tests cold-boot duration; it does not establish that more time resolves startup or change acceptance to a partial boot.
+
+[Run 39526496486](https://github.com/STEVVVU/cleartrail-android/actions/runs/39526496486) passed both APK builds and artifact transfer, but its 45-minute native job was cancelled after the visible log stopped at `emulator -list-avds`. No native artifact, CLI logs or cleanup proof survived. The earlier output did not identify whether process creation or a later call stalled. The current diagnostics retain subprocess lifecycle events and repeated Python stack snapshots, and append each boot probe before recording its result. These changes improve diagnosis and evidence retention only. Native boot, navigation, instrumentation and cleanup remain unproved; one bounded hosted native run is required before accepting the driver change.
