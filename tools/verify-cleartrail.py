@@ -186,14 +186,16 @@ def main():
                                     env=env, cwd=ROOT, stdout=emulator_log, stderr=subprocess.STDOUT,
                                     start_new_session=True)
         result["actions"].append({"action": "launch-emulator", "pid": emulator.pid, "accelerated": True})
-        deadline = time.monotonic() + 300
+        boot_started = time.monotonic()
+        deadline = boot_started + 900
         while time.monotonic() < deadline:
             if emulator.poll() is not None:
                 raise RuntimeError("Owned emulator exited. Inspect emulator.log.")
             try:
                 completed = adb("shell", "getprop", "sys.boot_completed").strip()
                 package = adb("shell", "pm", "path", "android") if completed == b"1" else b""
-                (run / "boot-probe.json").write_text(json.dumps({"completed": completed.decode(errors="replace"),
+                (run / "boot-probe.json").write_text(json.dumps({"elapsedSeconds": round(time.monotonic() - boot_started, 3),
+                                                                "deadlineSeconds": 900, "completed": completed.decode(errors="replace"),
                                                                 "package": package.decode(errors="replace")}), encoding="utf-8")
                 if completed == b"1" and b"package:" in package:
                     break
@@ -202,8 +204,8 @@ def main():
                                                                 "stderr": str(getattr(error, "stderr", b""))[:4000]}), encoding="utf-8")
             time.sleep(0.5)
         else:
-            raise TimeoutError("Owned emulator did not complete boot within 300 seconds.")
-        result["actions"].append({"action": "boot", "api": 30})
+            raise TimeoutError("Owned emulator did not complete boot within 900 seconds.")
+        result["actions"].append({"action": "boot", "api": 30, "elapsedSeconds": round(time.monotonic() - boot_started, 3)})
         try:
             picker = subprocess.run([str(sdk / "platform-tools" / "adb"), "-s", "emulator-5580", "shell", "cmd", "package",
                                      "resolve-activity", "--brief", "-a", "android.intent.action.CREATE_DOCUMENT",
