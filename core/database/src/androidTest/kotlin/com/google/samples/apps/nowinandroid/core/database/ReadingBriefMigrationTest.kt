@@ -64,7 +64,8 @@ class ReadingBriefMigrationTest {
             close()
         }
 
-        Room.databaseBuilder(context, NiaDatabase::class.java, databaseName).build().use { database ->
+        val database = Room.databaseBuilder(context, NiaDatabase::class.java, databaseName).build()
+        try {
             val savedNewsAndTopic = database.openHelper.readableDatabase.query(
                 """SELECT news_resources.title, topics.name
                     FROM news_resources
@@ -80,6 +81,8 @@ class ReadingBriefMigrationTest {
             val draft = ReadingBriefDraftEntity(payload = """{"sources":["SAVED_SELECTION"]}""")
             database.readingBriefDraftDao().saveDraft(draft)
             assertEquals(draft, database.readingBriefDraftDao().observeDraft().first())
+        } finally {
+            database.close()
         }
         context.deleteDatabase(databaseName)
     }

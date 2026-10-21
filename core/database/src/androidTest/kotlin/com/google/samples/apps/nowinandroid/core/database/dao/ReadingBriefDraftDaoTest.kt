@@ -32,12 +32,18 @@ class ReadingBriefDraftDaoTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val databaseName = "reading-brief-test"
         val draft = ReadingBriefDraftEntity(payload = "{\"sources\":[\"SAVED_SELECTION\"]}")
-        Room.databaseBuilder(context, NiaDatabase::class.java, databaseName).build().use { database ->
+        val database = Room.databaseBuilder(context, NiaDatabase::class.java, databaseName).build()
+        try {
             database.readingBriefDraftDao().saveDraft(draft)
+        } finally {
+            database.close()
         }
 
-        Room.databaseBuilder(context, NiaDatabase::class.java, databaseName).build().use { database ->
-            assertEquals(draft, database.readingBriefDraftDao().observeDraft().first())
+        val reopened = Room.databaseBuilder(context, NiaDatabase::class.java, databaseName).build()
+        try {
+            assertEquals(draft, reopened.readingBriefDraftDao().observeDraft().first())
+        } finally {
+            reopened.close()
         }
         context.deleteDatabase(databaseName)
     }
