@@ -48,7 +48,7 @@ internal class OfflineFirstReadingBriefDraftRepository @Inject constructor(
             }
             require(stored.sources.distinct().size == stored.sources.size)
             require(sources == expected)
-            require(stored.articles.size <= MAX_ARTICLES)
+            require(stored.articles.size <= MAX_READING_BRIEF_ARTICLES)
             require(stored.privateNote.length <= MAX_NOTE_LENGTH)
             require(stored.articles.all { it.id.length <= 256 && it.title.length <= 1_000 && it.url.length <= 2_048 })
             ReadingBriefDraft(
