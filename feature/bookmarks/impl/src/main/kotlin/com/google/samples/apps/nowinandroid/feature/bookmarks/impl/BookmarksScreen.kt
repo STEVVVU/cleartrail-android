@@ -48,12 +48,9 @@ import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridS
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -78,7 +75,10 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.google.samples.apps.nowinandroid.core.designsystem.component.NiaButton
 import com.google.samples.apps.nowinandroid.core.designsystem.component.NiaLoadingWheel
+import com.google.samples.apps.nowinandroid.core.designsystem.component.NiaOutlinedButton
+import com.google.samples.apps.nowinandroid.core.designsystem.component.NiaTextButton
 import com.google.samples.apps.nowinandroid.core.designsystem.component.scrollbar.DraggableScrollbar
 import com.google.samples.apps.nowinandroid.core.designsystem.component.scrollbar.rememberDraggableScroller
 import com.google.samples.apps.nowinandroid.core.designsystem.component.scrollbar.scrollbarState
@@ -123,7 +123,7 @@ internal fun BookmarksScreen(
             undoBookmarkRemoval = viewModel::undoBookmarkRemoval,
             clearUndoState = viewModel::clearUndoState,
         )
-        Button(
+        NiaButton(
             onClick = { showBrief = true },
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
         ) {
@@ -179,7 +179,7 @@ private fun ReadingBriefDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(stringResource(R.string.feature_bookmarks_api_brief_intro))
-                OutlinedButton(onClick = { onReplace(saved.take(MAX_READING_BRIEF_ARTICLES)) }, enabled = !state.loading && saved.isNotEmpty()) {
+                NiaOutlinedButton(onClick = { onReplace(saved.take(MAX_READING_BRIEF_ARTICLES)) }, enabled = !state.loading && saved.isNotEmpty()) {
                     Text(
                         if (saved.size > MAX_READING_BRIEF_ARTICLES) {
                             stringResource(R.string.feature_bookmarks_api_brief_replace_limited, MAX_READING_BRIEF_ARTICLES, saved.size)
@@ -196,13 +196,13 @@ private fun ReadingBriefDialog(
                     supportingText = { Text(stringResource(R.string.feature_bookmarks_api_brief_note_help)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedButton(onClick = onChooseDestination, enabled = !state.loading) {
+                NiaOutlinedButton(onClick = onChooseDestination, enabled = !state.loading) {
                     Text(stringResource(R.string.feature_bookmarks_api_brief_choose))
                 }
                 state.destinationName?.let {
                     Text(stringResource(R.string.feature_bookmarks_api_brief_destination, it), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                OutlinedButton(onClick = onReview, enabled = !state.loading) {
+                NiaOutlinedButton(onClick = onReview, enabled = !state.loading) {
                     Text(stringResource(R.string.feature_bookmarks_api_brief_review))
                 }
                 state.preview?.let { preview ->
@@ -213,7 +213,7 @@ private fun ReadingBriefDialog(
                         modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodySmall,
                     )
-                    Button(onClick = onApprove, enabled = state.destination != null) {
+                    NiaButton(onClick = onApprove, enabled = state.destination != null) {
                         Text(stringResource(R.string.feature_bookmarks_api_brief_approve))
                     }
                     if (state.destination == null) {
@@ -222,8 +222,8 @@ private fun ReadingBriefDialog(
                 }
                 if (state.grant != null) {
                     Text(stringResource(R.string.feature_bookmarks_api_brief_provider))
-                    Button(onClick = onWrite) { Text(stringResource(R.string.feature_bookmarks_api_brief_write)) }
-                    TextButton(onClick = onRevoke) { Text(stringResource(R.string.feature_bookmarks_api_brief_revoke)) }
+                    NiaButton(onClick = onWrite) { Text(stringResource(R.string.feature_bookmarks_api_brief_write)) }
+                    NiaTextButton(onClick = onRevoke) { Text(stringResource(R.string.feature_bookmarks_api_brief_revoke)) }
                 }
                 state.status?.let { status ->
                     val isFailure = status in setOf(
@@ -241,7 +241,7 @@ private fun ReadingBriefDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.feature_bookmarks_api_brief_close)) }
+            NiaTextButton(onClick = onDismiss) { Text(stringResource(R.string.feature_bookmarks_api_brief_close)) }
         },
     )
 }
