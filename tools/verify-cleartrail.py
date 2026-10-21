@@ -101,17 +101,10 @@ def main():
         command([sdk / "emulator" / "emulator", "-accel-check"], "acceleration.log", timeout=30)
         result["actions"].append({"action": "doctor", "compileSdk": 36, "platform": platform.system(),
                                   "architecture": platform.machine(), "accelerationPreflightPassed": True})
-        gradle_options = [
-            "--console=plain", "--no-daemon", "--max-workers=3",
-            "-Dorg.gradle.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError -Xmx6g -Xms512m",
-            "-Pkotlin.daemon.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=320m -Xmx2g -Xms256m",
-        ]
-        result["actions"].append({"action": "build-memory-budget", "gradleHeapGiB": 6, "kotlinHeapGiB": 2, "maxWorkers": 3})
-        command(["./gradlew", ":app:assembleDemoDebug", ":app:assembleDemoDebugAndroidTest", *gradle_options],
-                "build.log", timeout=1800)
-        result["actions"].append({"action": "build", "variant": "demoDebug"})
         image = "system-images;android-30;aosp_atd;x86_64"
         command([sdkmanager, "emulator", image], "sdk.log", timeout=300)
+        command([sdk / "emulator" / "emulator", "-version"], "emulator-version.log", timeout=15)
+        command([sdk / "emulator" / "emulator", "-accel-check"], "acceleration-after-install.log", timeout=30)
         avd = "cleartrail-" + args.run_name
         avd_home = Path(env["ANDROID_AVD_HOME"])
         avd_home.mkdir()
@@ -126,7 +119,7 @@ def main():
         emulator = subprocess.Popen([str(sdk / "emulator" / "emulator"), "-avd", avd, "-port", "5580",
                                      "-no-window", "-no-audio", "-no-snapshot", "-gpu", "swiftshader_indirect",
                                      "-camera-back", "none", "-camera-front", "none", "-memory", "2048",
-                                     "-accel", "on"],
+                                     "-accel", "on", "-show-kernel", "-logcat", "*:W", "-no-metrics"],
                                     env=env, cwd=ROOT, stdout=emulator_log, stderr=subprocess.STDOUT,
                                     start_new_session=True)
         result["actions"].append({"action": "launch-emulator", "pid": emulator.pid, "accelerated": True})
@@ -148,6 +141,15 @@ def main():
         else:
             raise TimeoutError("Owned emulator did not complete boot within 300 seconds.")
         result["actions"].append({"action": "boot", "api": 30})
+        gradle_options = [
+            "--console=plain", "--no-daemon", "--max-workers=3",
+            "-Dorg.gradle.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError -Xmx6g -Xms512m",
+            "-Pkotlin.daemon.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=320m -Xmx2g -Xms256m",
+        ]
+        result["actions"].append({"action": "build-memory-budget", "gradleHeapGiB": 6, "kotlinHeapGiB": 2, "maxWorkers": 3})
+        command(["./gradlew", ":app:assembleDemoDebug", ":app:assembleDemoDebugAndroidTest", *gradle_options],
+                "build.log", timeout=1800)
+        result["actions"].append({"action": "build", "variant": "demoDebug"})
         apk = ROOT / "app/build/outputs/apk/demo/debug/app-demo-debug.apk"
         assert apk.is_file(), "Expected demo debug APK is missing."
         adb("install", "-r", str(apk), timeout=60)
@@ -176,6 +178,28 @@ def main():
         result["nativeAcceptance"] = True
     except BaseException as error:
         result["error"] = str(error)
+        if emulator is not None:
+            probes = {}
+            for name, arguments in [
+                ("devices", ["devices", "-l"]),
+                ("properties", ["-s", "emulator-5580", "shell", "getprop"]),
+                ("processes", ["-s", "emulator-5580", "shell", "ps", "-A"]),
+                ("logcat", ["-s", "emulator-5580", "logcat", "-d", "-t", "200"]),
+                ("screen", ["-s", "emulator-5580", "exec-out", "screencap", "-p"]),
+            ]:
+                try:
+                    probe = subprocess.run([str(sdk / "platform-tools" / "adb"), *arguments], env=env,
+                                           capture_output=True, timeout=10)
+                    probes[name] = {"returncode": probe.returncode, "stderr": probe.stderr.decode(errors="replace")[:4000]}
+                    if name == "screen":
+                        if probe.returncode == 0 and probe.stdout.startswith(b"\x89PNG\r\n\x1a\n"):
+                            (run / "failure-screen.png").write_bytes(probe.stdout)
+                            probes[name]["pngRetained"] = True
+                    else:
+                        (run / ("failure-" + name + ".log")).write_bytes(probe.stdout)
+                except (OSError, subprocess.TimeoutExpired) as probe_error:
+                    probes[name] = {"error": str(probe_error)}
+            (run / "failure-probes.json").write_text(json.dumps(probes, indent=2), encoding="utf-8")
         raise
     finally:
         result["cleanup"] = {"emulatorStopped": False, "evidenceRetained": run.exists()}
