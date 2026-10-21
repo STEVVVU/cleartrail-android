@@ -43,6 +43,9 @@ jobs:
         with:
           name: cleartrail-build-evidence
           path: |
+            core/data/build/test-results/**/*.xml
+            feature/bookmarks/impl/build/test-results/**/*.xml
+            feature/bookmarks/impl/build/reports/lint-results*.xml
             .audit/verification/*/*.json
             .audit/verification/*/*.jsonl
             .audit/verification/*/*.log

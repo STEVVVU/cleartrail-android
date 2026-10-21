@@ -16,6 +16,11 @@
 
 package com.google.samples.apps.nowinandroid.feature.bookmarks.impl
 
+import android.content.ContentResolver
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.VisibleForTesting
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.Orientation
@@ -28,7 +33,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.systemBars
@@ -39,20 +44,32 @@ import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridItemSpan
 import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import androidx.compose.ui.unit.dp
@@ -66,6 +83,8 @@ import com.google.samples.apps.nowinandroid.core.designsystem.component.scrollba
 import com.google.samples.apps.nowinandroid.core.designsystem.component.scrollbar.scrollbarState
 import com.google.samples.apps.nowinandroid.core.designsystem.theme.LocalTintTheme
 import com.google.samples.apps.nowinandroid.core.designsystem.theme.NiaTheme
+import com.google.samples.apps.nowinandroid.core.model.data.MAX_READING_BRIEF_ARTICLES
+import com.google.samples.apps.nowinandroid.core.model.data.ReadingBriefArticle
 import com.google.samples.apps.nowinandroid.core.model.data.UserNewsResource
 import com.google.samples.apps.nowinandroid.core.ui.NewsFeedUiState
 import com.google.samples.apps.nowinandroid.core.ui.NewsFeedUiState.Loading
@@ -84,16 +103,145 @@ internal fun BookmarksScreen(
     viewModel: BookmarksViewModel = hiltViewModel(),
 ) {
     val feedState by viewModel.feedUiState.collectAsStateWithLifecycle()
-    BookmarksScreen(
-        feedState = feedState,
-        onShowSnackbar = onShowSnackbar,
-        removeFromBookmarks = viewModel::removeFromSavedResources,
-        onNewsResourceViewed = { viewModel.setNewsResourceViewed(it, true) },
-        onTopicClick = onTopicClick,
-        modifier = modifier,
-        shouldDisplayUndoBookmark = viewModel.shouldDisplayUndoBookmark,
-        undoBookmarkRemoval = viewModel::undoBookmarkRemoval,
-        clearUndoState = viewModel::clearUndoState,
+    val briefViewModel: ReadingBriefViewModel = hiltViewModel()
+    val briefState by briefViewModel.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    var showBrief by remember { mutableStateOf(false) }
+    val createDocument = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        briefViewModel.chooseDestination(uri, uri?.let { documentLabel(context.contentResolver, it) })
+    }
+    Box(modifier = modifier.fillMaxSize()) {
+        BookmarksScreen(
+            feedState = feedState,
+            onShowSnackbar = onShowSnackbar,
+            removeFromBookmarks = viewModel::removeFromSavedResources,
+            onNewsResourceViewed = { viewModel.setNewsResourceViewed(it, true) },
+            onTopicClick = onTopicClick,
+            modifier = Modifier.fillMaxSize(),
+            shouldDisplayUndoBookmark = viewModel.shouldDisplayUndoBookmark,
+            undoBookmarkRemoval = viewModel::undoBookmarkRemoval,
+            clearUndoState = viewModel::clearUndoState,
+        )
+        Button(
+            onClick = { showBrief = true },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 24.dp),
+        ) {
+            Text(stringResource(R.string.feature_bookmarks_api_brief_action))
+        }
+    }
+    if (showBrief) {
+        ReadingBriefDialog(
+            state = briefState,
+            saved = (feedState as? Success)?.feed.orEmpty().map {
+                ReadingBriefArticle(it.id, it.title, it.url)
+            },
+            onDismiss = { showBrief = false },
+            onReplace = briefViewModel::replaceFromSaved,
+            onNoteChange = briefViewModel::updateNote,
+            onReview = briefViewModel::review,
+            onChooseDestination = { createDocument.launch("reading-brief.json") },
+            onApprove = briefViewModel::approve,
+            onRevoke = briefViewModel::revoke,
+            onWrite = { briefViewModel.write(context.contentResolver) },
+        )
+    }
+}
+
+private fun documentLabel(resolver: ContentResolver, uri: Uri): String {
+    val name = runCatching {
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    }.getOrNull()
+    return listOfNotNull(name, uri.authority).joinToString(" · ").ifBlank { uri.lastPathSegment.orEmpty() }
+}
+
+@Composable
+private fun ReadingBriefDialog(
+    state: ReadingBriefUiState,
+    saved: List<ReadingBriefArticle>,
+    onDismiss: () -> Unit,
+    onReplace: (List<ReadingBriefArticle>) -> Unit,
+    onNoteChange: (String) -> Unit,
+    onReview: () -> Unit,
+    onChooseDestination: () -> Unit,
+    onApprove: () -> Unit,
+    onRevoke: () -> Unit,
+    onWrite: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.feature_bookmarks_api_brief_title)) },
+        text = {
+            Column(
+                modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(stringResource(R.string.feature_bookmarks_api_brief_intro))
+                OutlinedButton(onClick = { onReplace(saved.take(MAX_READING_BRIEF_ARTICLES)) }, enabled = !state.loading && saved.isNotEmpty()) {
+                    Text(
+                        if (saved.size > MAX_READING_BRIEF_ARTICLES) {
+                            stringResource(R.string.feature_bookmarks_api_brief_replace_limited, MAX_READING_BRIEF_ARTICLES, saved.size)
+                        } else {
+                            stringResource(R.string.feature_bookmarks_api_brief_replace, saved.size)
+                        },
+                    )
+                }
+                OutlinedTextField(
+                    value = state.draft.privateNote,
+                    enabled = !state.loading,
+                    onValueChange = onNoteChange,
+                    label = { Text(stringResource(R.string.feature_bookmarks_api_brief_note)) },
+                    supportingText = { Text(stringResource(R.string.feature_bookmarks_api_brief_note_help)) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedButton(onClick = onChooseDestination, enabled = !state.loading) {
+                    Text(stringResource(R.string.feature_bookmarks_api_brief_choose))
+                }
+                state.destinationName?.let {
+                    Text(stringResource(R.string.feature_bookmarks_api_brief_destination, it), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                OutlinedButton(onClick = onReview, enabled = !state.loading) {
+                    Text(stringResource(R.string.feature_bookmarks_api_brief_review))
+                }
+                state.preview?.let { preview ->
+                    Text(stringResource(R.string.feature_bookmarks_api_brief_sources, preview.sources.joinToString { it.name }))
+                    Text(stringResource(R.string.feature_bookmarks_api_brief_hash, preview.sha256), style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        text = preview.bytes.decodeToString(),
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Button(onClick = onApprove, enabled = state.destination != null) {
+                        Text(stringResource(R.string.feature_bookmarks_api_brief_approve))
+                    }
+                    if (state.destination == null) {
+                        Text(stringResource(R.string.feature_bookmarks_api_brief_no_destination))
+                    }
+                }
+                if (state.grant != null) {
+                    Text(stringResource(R.string.feature_bookmarks_api_brief_provider))
+                    Button(onClick = onWrite) { Text(stringResource(R.string.feature_bookmarks_api_brief_write)) }
+                    TextButton(onClick = onRevoke) { Text(stringResource(R.string.feature_bookmarks_api_brief_revoke)) }
+                }
+                state.status?.let { status ->
+                    val isFailure = status in setOf(
+                        R.string.feature_bookmarks_api_brief_failed,
+                        R.string.feature_bookmarks_api_brief_invalid,
+                        R.string.feature_bookmarks_api_brief_review_failed,
+                        R.string.feature_bookmarks_api_brief_load_failed,
+                        R.string.feature_bookmarks_api_brief_save_failed,
+                    )
+                    Text(
+                        stringResource(status),
+                        color = if (isFailure) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.feature_bookmarks_api_brief_close)) }
+        },
     )
 }
 

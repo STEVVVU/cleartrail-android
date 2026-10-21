@@ -5,7 +5,7 @@ description: Build the real demo Android APKs, validate their transfer, drive an
 
 # Verify Cleartrail
 
-The user's current delivery scope prioritizes code, builds and focused tests. Push CI runs the build and deterministic boundaries. The emulator job is optional through workflow dispatch with `native=true`. A skipped emulator job never establishes native UI or document-provider acceptance. Original feature implementation may proceed with source/build verification while those checks remain explicitly unverified.
+The user's current delivery scope prioritizes code, builds and focused tests. Push CI runs demo unit tests for the draft repository and Saved feature, lints the touched Compose feature, compiles the Room reopen test, builds both APKs, and retains the generated schema 15 snapshot in build evidence. The emulator job is optional through workflow dispatch with `native=true`. A skipped emulator job never establishes native UI or document-provider acceptance. Original feature implementation may proceed with source/build verification while those checks remain explicitly unverified.
 
 Status: draft. Both APKs and emulator boot have been observed, but normal navigation and the existing instrumentation class have not passed together. The Windows workspace has no configured Android SDK or emulator.
 
@@ -25,7 +25,7 @@ The workflow transfers `app.apk`, `tests.apk` and `manifest.json` through the of
 
 ## Doctor
 
-Record Java, SDK, available memory, source hashes, emulator version and acceleration preflight. Build only `demoDebug` and its native test APK using a 6 GiB Gradle heap, 2 GiB Kotlin heap and three workers. Never autoaccept SDK licenses, change KVM permissions or install a hypervisor. Refuse occupied emulator ports and existing evidence directories.
+Record Java, SDK, available memory, source hashes, emulator version and acceleration preflight. Build only `demoDebug` and its native test APK using a 6 GiB Gradle heap, 2 GiB Kotlin heap and three workers. The build also runs `:core:data:testDemoDebugUnitTest`, `:feature:bookmarks:impl:testDemoDebugUnitTest`, `:feature:bookmarks:impl:lintDemoDebug` and `:core:database:assembleDemoDebugAndroidTest`. The build evidence retains the exported Room schema 15 for review and check-in. Never autoaccept SDK licenses, change KVM permissions or install a hypervisor. Refuse occupied emulator ports and existing evidence directories.
 
 Create the owned AVD directories and require its index and emulator discovery. Check acceleration after SDK installation and bound actual guest boot/package readiness to 900 seconds, retaining elapsed time. `command-events.jsonl` records flushed start, spawn, completion or failure events for each subprocess; repeated Python stack snapshots go to `python-stacks.log`. The append-only `boot-probes.jsonl` records each started and completed adb call plus readiness state, so a truncated hosted job identifies its last completed call. These diagnostics do not extend command or job deadlines. Record the real `CREATE_DOCUMENT` resolver result in `document-picker.json`; its availability is a prerequisite for a future document-export feature, not a baseline requirement.
 

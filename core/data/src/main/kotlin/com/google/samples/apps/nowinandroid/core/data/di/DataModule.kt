@@ -20,8 +20,10 @@ import com.google.samples.apps.nowinandroid.core.data.repository.DefaultRecentSe
 import com.google.samples.apps.nowinandroid.core.data.repository.DefaultSearchContentsRepository
 import com.google.samples.apps.nowinandroid.core.data.repository.NewsRepository
 import com.google.samples.apps.nowinandroid.core.data.repository.OfflineFirstNewsRepository
+import com.google.samples.apps.nowinandroid.core.data.repository.OfflineFirstReadingBriefDraftRepository
 import com.google.samples.apps.nowinandroid.core.data.repository.OfflineFirstTopicsRepository
 import com.google.samples.apps.nowinandroid.core.data.repository.OfflineFirstUserDataRepository
+import com.google.samples.apps.nowinandroid.core.data.repository.ReadingBriefDraftRepository
 import com.google.samples.apps.nowinandroid.core.data.repository.RecentSearchRepository
 import com.google.samples.apps.nowinandroid.core.data.repository.SearchContentsRepository
 import com.google.samples.apps.nowinandroid.core.data.repository.TopicsRepository
@@ -58,6 +60,11 @@ abstract class DataModule {
     internal abstract fun bindsRecentSearchRepository(
         recentSearchRepository: DefaultRecentSearchRepository,
     ): RecentSearchRepository
+
+    @Binds
+    internal abstract fun bindsReadingBriefDraftRepository(
+        repository: OfflineFirstReadingBriefDraftRepository,
+    ): ReadingBriefDraftRepository
 
     @Binds
     internal abstract fun bindsSearchContentsRepository(

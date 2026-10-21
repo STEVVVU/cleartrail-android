@@ -179,14 +179,36 @@ def main():
                 "-Pkotlin.daemon.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=320m -Xmx2g -Xms256m",
             ]
             result["actions"].append({"action": "build-memory-budget", "gradleHeapGiB": 6, "kotlinHeapGiB": 2, "maxWorkers": 3})
-            command(["./gradlew", ":app:assembleDemoDebug", ":app:assembleDemoDebugAndroidTest", *gradle_options],
-                    "build.log", timeout=1800)
+            command([
+                "./gradlew",
+                ":core:data:testDemoDebugUnitTest",
+                ":feature:bookmarks:impl:testDemoDebugUnitTest",
+                ":feature:bookmarks:impl:lintDemoDebug",
+                ":core:database:assembleDemoDebugAndroidTest",
+                ":app:assembleDemoDebug",
+                ":app:assembleDemoDebugAndroidTest",
+                *gradle_options,
+            ], "build.log", timeout=1800)
+            generated_schema = ROOT / "core/database/schemas/com.google.samples.apps.nowinandroid.core.database.NiaDatabase/15.json"
+            assert generated_schema.is_file(), "Room did not export the schema 15 snapshot."
+            shutil.copyfile(generated_schema, run / "room-schema-15.json")
             package_apks(run / "apks", os.environ["GITHUB_SHA"], {
                 "app.apk": ROOT / "app/build/outputs/apk/demo/debug/app-demo-debug.apk",
                 "tests.apk": ROOT / "app/build/outputs/apk/androidTest/demo/debug/app-demo-debug-androidTest.apk",
             })
             validated_apks(run / "apks", os.environ["GITHUB_SHA"])
-            result["actions"].append({"action": "build", "variant": "demoDebug", "manifest": "apks/manifest.json"})
+            result["actions"].append({
+                "action": "build-and-focused-tests",
+                "variant": "demoDebug",
+                "tasks": [
+                    ":core:data:testDemoDebugUnitTest",
+                    ":feature:bookmarks:impl:testDemoDebugUnitTest",
+                    ":feature:bookmarks:impl:lintDemoDebug",
+                    ":core:database:assembleDemoDebugAndroidTest",
+                ],
+                "roomSchema": "room-schema-15.json",
+                "manifest": "apks/manifest.json",
+            })
             result["buildAccepted"] = True
             return
         manifest = validated_apks(args.apk_dir, os.environ["GITHUB_SHA"])

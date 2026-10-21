@@ -19,6 +19,7 @@ package com.google.samples.apps.nowinandroid.core.database.di
 import com.google.samples.apps.nowinandroid.core.database.NiaDatabase
 import com.google.samples.apps.nowinandroid.core.database.dao.NewsResourceDao
 import com.google.samples.apps.nowinandroid.core.database.dao.NewsResourceFtsDao
+import com.google.samples.apps.nowinandroid.core.database.dao.ReadingBriefDraftDao
 import com.google.samples.apps.nowinandroid.core.database.dao.RecentSearchQueryDao
 import com.google.samples.apps.nowinandroid.core.database.dao.TopicDao
 import com.google.samples.apps.nowinandroid.core.database.dao.TopicFtsDao
@@ -54,4 +55,9 @@ internal object DaosModule {
     fun providesRecentSearchQueryDao(
         database: NiaDatabase,
     ): RecentSearchQueryDao = database.recentSearchQueryDao()
+
+    @Provides
+    fun providesReadingBriefDraftDao(
+        database: NiaDatabase,
+    ): ReadingBriefDraftDao = database.readingBriefDraftDao()
 }

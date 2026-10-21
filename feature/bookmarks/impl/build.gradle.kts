@@ -17,6 +17,7 @@
 plugins {
     alias(libs.plugins.nowinandroid.android.feature.impl)
     alias(libs.plugins.nowinandroid.android.library.compose)
+    id("kotlinx-serialization")
 }
 
 android {
@@ -27,7 +28,10 @@ dependencies {
     implementation(projects.core.data)
     implementation(projects.feature.bookmarks.api)
     implementation(projects.feature.topic.api)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.kotlinx.serialization.json)
 
+    testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(projects.core.testing)
 
     androidTestImplementation(libs.bundles.androidx.compose.ui.test)
