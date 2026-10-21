@@ -179,19 +179,22 @@ def main():
                 "-Pkotlin.daemon.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=320m -Xmx2g -Xms256m",
             ]
             result["actions"].append({"action": "build-memory-budget", "gradleHeapGiB": 6, "kotlinHeapGiB": 2, "maxWorkers": 3})
-            command([
-                "./gradlew",
-                ":core:data:testDemoDebugUnitTest",
-                ":feature:bookmarks:impl:testDemoDebugUnitTest",
-                ":feature:bookmarks:impl:lintDemoDebug",
-                ":core:database:assembleDemoDebugAndroidTest",
-                ":app:assembleDemoDebug",
-                ":app:assembleDemoDebugAndroidTest",
-                *gradle_options,
-            ], "build.log", timeout=1800)
             generated_schema = ROOT / "core/database/schemas/com.google.samples.apps.nowinandroid.core.database.NiaDatabase/15.json"
+            try:
+                command([
+                    "./gradlew",
+                    ":core:data:testDemoDebugUnitTest",
+                    ":feature:bookmarks:impl:testDemoDebugUnitTest",
+                    ":feature:bookmarks:impl:lintDemoDebug",
+                    ":core:database:assembleDemoDebugAndroidTest",
+                    ":app:assembleDemoDebug",
+                    ":app:assembleDemoDebugAndroidTest",
+                    *gradle_options,
+                ], "build.log", timeout=1800)
+            finally:
+                if generated_schema.is_file():
+                    shutil.copyfile(generated_schema, run / "room-schema-15.json")
             assert generated_schema.is_file(), "Room did not export the schema 15 snapshot."
-            shutil.copyfile(generated_schema, run / "room-schema-15.json")
             package_apks(run / "apks", os.environ["GITHUB_SHA"], {
                 "app.apk": ROOT / "app/build/outputs/apk/demo/debug/app-demo-debug.apk",
                 "tests.apk": ROOT / "app/build/outputs/apk/androidTest/demo/debug/app-demo-debug-androidTest.apk",
