@@ -9,9 +9,9 @@ permissions:
   contents: read
 
 jobs:
-  native-baseline:
-    runs-on: macos-26-intel
-    timeout-minutes: 45
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v5
@@ -21,15 +21,46 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Inspect actual SDK prerequisites
-        run: |
-          test -d "$ANDROID_HOME/platforms/android-36"
-          test -x "$ANDROID_HOME/platform-tools/adb"
-          test -x "$ANDROID_HOME/emulator/emulator"
-      - name: Build and verify the real native app
+      - name: Check artifact and instrumentation boundaries
+        run: python -m unittest discover -s tools -p test_verify_cleartrail.py
+      - name: Build both APKs
         env:
           GRADLE_USER_HOME: ${{ runner.temp }}/cleartrail-gradle
-        run: python tools/verify-cleartrail.py ci-${{ github.run_id }}
+        run: python tools/verify-cleartrail.py ci-build-${{ github.run_id }} --mode build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cleartrail-apks
+          path: .audit/verification/ci-build-${{ github.run_id }}/apks/*
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cleartrail-build-evidence
+          path: |
+            .audit/verification/*/*.json
+            .audit/verification/*/*.log
+          retention-days: 7
+
+  native-baseline:
+    needs: build
+    runs-on: macos-26-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: '21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: cleartrail-apks
+          path: .audit/apks-${{ github.run_id }}
+      - name: Drive the exact built native app
+        run: python tools/verify-cleartrail.py ci-native-${{ github.run_id }} --mode native --apk-dir .audit/apks-${{ github.run_id }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -40,6 +71,4 @@ jobs:
             .audit/verification/*/*.txt
             .audit/verification/*/*.xml
             .audit/verification/*/*.png
-            app/build/outputs/androidTest-results/**
-            app/build/reports/androidTests/**
-            app/build/outputs/apk/demo/debug/*.apk
+          retention-days: 7

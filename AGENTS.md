@@ -11,7 +11,7 @@ This project is a modern Android application that follows the official architect
 -   **UI:** Built entirely with Jetpack Compose, including Material 3 components and adaptive layouts for different screen sizes.
 -   **State Management:** Unidirectional Data Flow (UDF) is implemented using Kotlin Coroutines and `Flow`s. `ViewModel`s act as state holders, exposing UI state as streams of data.
 -   **Dependency Injection:** Hilt is used for dependency injection throughout the app, simplifying the management of dependencies and improving testability.
--   **Navigation:** Navigation is handled by Jetpack Navigation 2 for Compose, allowing for a declarative and type-safe way to navigate between screens.
+-   **Navigation:** Navigation is handled by Jetpack Navigation 3 for Compose, allowing for a declarative and type-safe way to navigate between screens.
 -   **Data:** The data layer is implemented using the repository pattern.
     -   **Local Data:** Room and DataStore are used for local data persistence.
     -   **Remote Data:** Retrofit and OkHttp are used for fetching data from the network.
@@ -56,3 +56,7 @@ The app and Android libraries have two product flavors: `demo` and `prod`, and t
 ## Version control and code location
 
 - The project uses git and is hosted in https://github.com/android/nowinandroid.
+
+## Cleartrail verification
+
+Use `.agents/skills/verify-cleartrail/SKILL.md` for this fork's hosted native acceptance. The maintained Python driver has separate `--mode build` and `--mode native --apk-dir <same-run-artifact>` phases. Native device operations run only on the dedicated hosted emulator. Local boundary checks use `python -m unittest discover -s tools -p test_verify_cleartrail.py`; they do not prove app behavior.

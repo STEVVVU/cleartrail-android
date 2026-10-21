@@ -1,6 +1,7 @@
 """Hosted native Android verification; no UI automation on the user's computer."""
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,6 +16,44 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.google.samples.apps.nowinandroid.demo.debug"
+TEST_CLASS = "com.google.samples.apps.nowinandroid.ui.NavigationTest"
+TEST_RUNNER = PACKAGE + ".test/com.google.samples.apps.nowinandroid.core.testing.NiaTestRunner"
+
+
+def package_apks(destination, source_commit, files):
+    destination.mkdir()
+    manifest = {"schemaVersion": 1, "sourceCommit": source_commit, "files": {}}
+    for name, source in files.items():
+        target = destination / name
+        shutil.copyfile(source, target)
+        manifest["files"][name] = hashlib.sha256(target.read_bytes()).hexdigest()
+    (destination / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+def validated_apks(directory, source_commit):
+    manifest_path = directory / "manifest.json"
+    if manifest_path.is_symlink():
+        raise ValueError("APK manifest must be a regular file.")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if type(manifest.get("schemaVersion")) is not int or manifest["schemaVersion"] != 1 or manifest.get("sourceCommit") != source_commit:
+        raise ValueError("APK manifest schema or source commit does not match this workflow.")
+    if not source_commit or set(manifest.get("files", {})) != {"app.apk", "tests.apk"}:
+        raise ValueError("APK manifest must name exactly the app and test APKs.")
+    for name, digest in manifest["files"].items():
+        path = directory / name
+        if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise ValueError("APK integrity check failed for " + name)
+    return manifest
+
+
+def completed_navigation_tests(output):
+    count = re.search(r"^OK \((\d+) tests?\)\s*$", output, re.MULTILINE)
+    completed = re.search(r"^INSTRUMENTATION_CODE:\s*-1\s*$", output, re.MULTILINE)
+    failures = re.search(r"^INSTRUMENTATION_STATUS_CODE:\s*-(?:1|2|4)\s*$", output, re.MULTILINE)
+    ignored = len(re.findall(r"^INSTRUMENTATION_STATUS_CODE:\s*-3\s*$", output, re.MULTILINE))
+    if not count or int(count[1]) < 11 or not completed or failures or ignored > 1 or "FAILURES!!!" in output or "INSTRUMENTATION_FAILED" in output:
+        raise ValueError("Navigation instrumentation did not complete the mapped test class successfully. Inspect instrumentation.log.")
+    return {"completedTests": int(count[1]), "ignoredTests": ignored}
 
 
 def listening(port):
@@ -26,17 +65,21 @@ def listening(port):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("run_name")
+    parser.add_argument("--mode", choices=("build", "native"), required=True)
+    parser.add_argument("--apk-dir", type=Path)
     args = parser.parse_args()
     if os.environ.get("GITHUB_ACTIONS") != "true" or platform.system() not in ("Linux", "Darwin") or platform.machine() != "x86_64":
         parser.error("Use the dedicated x86_64 Linux/Intel macOS hosted workflow. No local SDK/device is configured.")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,60}", args.run_name):
         parser.error("Use a short alphanumeric run name.")
-    if listening(5580) or listening(5581):
+    if args.mode == "native" and args.apk_dir is None:
+        parser.error("Native verification requires the same-run APK artifact directory.")
+    if args.mode == "native" and (listening(5580) or listening(5581)):
         parser.error("Owned emulator ports must be free.")
     run = ROOT / ".audit" / "verification" / args.run_name
     run.mkdir(parents=True, exist_ok=False)
     sdk = Path(os.environ.get("ANDROID_HOME", "/nonexistent"))
-    result = {"run": args.run_name, "actions": [], "nativeAcceptance": False}
+    result = {"run": args.run_name, "stage": args.mode, "actions": [], "nativeAcceptance": False}
     emulator = None
     emulator_log = (run / "emulator.log").open("wb")
     env = dict(os.environ, ANDROID_AVD_HOME=str(run / "avd"), ANDROID_EMULATOR_HOME=str(run / "emulator-home"))
@@ -89,14 +132,34 @@ def main():
 
     try:
         assert shutil.which("java"), "JDK 21 is required."
-        assert (sdk / "platform-tools" / "adb").is_file(), "Preinstalled Android platform-tools required."
         assert (sdk / "platforms" / "android-36").is_dir(), "Preinstalled compile SDK 36 required."
-        sdkmanager = sdk / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
-        avdmanager = sdk / "cmdline-tools" / "latest" / "bin" / "avdmanager"
-        assert sdkmanager.is_file() and avdmanager.is_file(), "Preinstalled Android command-line tools required."
         command(["java", "-version"], "doctor.log", timeout=15)
         memory_command = ["free", "-m"] if platform.system() == "Linux" else ["sysctl", "hw.memsize"]
         command(memory_command, "doctor.log", timeout=15)
+        if args.mode == "build":
+            result["actions"].append({"action": "doctor", "compileSdk": 36, "platform": platform.system(), "stage": "build"})
+            gradle_options = [
+                "--console=plain", "--no-daemon", "--max-workers=3",
+                "-Dorg.gradle.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError -Xmx6g -Xms512m",
+                "-Pkotlin.daemon.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=320m -Xmx2g -Xms256m",
+            ]
+            result["actions"].append({"action": "build-memory-budget", "gradleHeapGiB": 6, "kotlinHeapGiB": 2, "maxWorkers": 3})
+            command(["./gradlew", ":app:assembleDemoDebug", ":app:assembleDemoDebugAndroidTest", *gradle_options],
+                    "build.log", timeout=1800)
+            package_apks(run / "apks", os.environ["GITHUB_SHA"], {
+                "app.apk": ROOT / "app/build/outputs/apk/demo/debug/app-demo-debug.apk",
+                "tests.apk": ROOT / "app/build/outputs/apk/androidTest/demo/debug/app-demo-debug-androidTest.apk",
+            })
+            validated_apks(run / "apks", os.environ["GITHUB_SHA"])
+            result["actions"].append({"action": "build", "variant": "demoDebug", "manifest": "apks/manifest.json"})
+            result["buildAccepted"] = True
+            return
+        manifest = validated_apks(args.apk_dir, os.environ["GITHUB_SHA"])
+        result["actions"].append({"action": "validate-build-artifact", "manifest": manifest})
+        assert (sdk / "platform-tools" / "adb").is_file(), "Preinstalled Android platform-tools required."
+        sdkmanager = sdk / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
+        avdmanager = sdk / "cmdline-tools" / "latest" / "bin" / "avdmanager"
+        assert sdkmanager.is_file() and avdmanager.is_file(), "Preinstalled Android command-line tools required."
         assert (sdk / "emulator" / "emulator").is_file(), "Preinstalled emulator required for the acceleration preflight."
         command([sdk / "emulator" / "emulator", "-accel-check"], "acceleration.log", timeout=30)
         result["actions"].append({"action": "doctor", "compileSdk": 36, "platform": platform.system(),
@@ -141,25 +204,25 @@ def main():
         else:
             raise TimeoutError("Owned emulator did not complete boot within 300 seconds.")
         result["actions"].append({"action": "boot", "api": 30})
-        gradle_options = [
-            "--console=plain", "--no-daemon", "--max-workers=3",
-            "-Dorg.gradle.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=256m -XX:+HeapDumpOnOutOfMemoryError -Xmx6g -Xms512m",
-            "-Pkotlin.daemon.jvmargs=-Dfile.encoding=UTF-8 -XX:+UseG1GC -XX:SoftRefLRUPolicyMSPerMB=1 -XX:ReservedCodeCacheSize=320m -Xmx2g -Xms256m",
-        ]
-        result["actions"].append({"action": "build-memory-budget", "gradleHeapGiB": 6, "kotlinHeapGiB": 2, "maxWorkers": 3})
-        command(["./gradlew", ":app:assembleDemoDebug", ":app:assembleDemoDebugAndroidTest", *gradle_options],
-                "build.log", timeout=1800)
-        result["actions"].append({"action": "build", "variant": "demoDebug"})
-        apk = ROOT / "app/build/outputs/apk/demo/debug/app-demo-debug.apk"
-        assert apk.is_file(), "Expected demo debug APK is missing."
+        try:
+            picker = subprocess.run([str(sdk / "platform-tools" / "adb"), "-s", "emulator-5580", "shell", "cmd", "package",
+                                     "resolve-activity", "--brief", "-a", "android.intent.action.CREATE_DOCUMENT",
+                                     "-c", "android.intent.category.OPENABLE", "-t", "application/json"],
+                                    env=env, capture_output=True, timeout=15)
+            picker_probe = {"returncode": picker.returncode, "stdout": picker.stdout.decode(errors="replace"),
+                            "stderr": picker.stderr.decode(errors="replace")}
+        except (OSError, subprocess.TimeoutExpired) as picker_error:
+            picker_probe = {"error": str(picker_error)}
+        (run / "document-picker.json").write_text(json.dumps(picker_probe, indent=2), encoding="utf-8")
+        apk = args.apk_dir / "app.apk"
         adb("install", "-r", str(apk), timeout=60)
-        launch = adb("shell", "am", "start", "-W", "-n", PACKAGE + "/com.google.samples.apps.nowinandroid.MainActivity", timeout=30)
+        launch = adb("shell", "am", "start", "-n", PACKAGE + "/com.google.samples.apps.nowinandroid.MainActivity", timeout=30)
         (run / "launch.txt").write_bytes(launch)
-        assert b"Error" not in launch and b"Status: ok" in launch
+        assert b"Error" not in launch, "ActivityManager rejected the MainActivity launch. Inspect launch.txt."
         deadline = time.monotonic() + 90
         while time.monotonic() < deadline:
             hierarchy = adb("exec-out", "uiautomator", "dump", "/dev/tty", timeout=20)
-            if b"Now in Android" in hierarchy and b"For you" in hierarchy and b"Interests" in hierarchy:
+            if PACKAGE.encode() in hierarchy and b"Now in Android" in hierarchy and b"For you" in hierarchy and b"Interests" in hierarchy:
                 break
             time.sleep(0.2)
         else:
@@ -170,11 +233,14 @@ def main():
         assert screenshot.startswith(b"\x89PNG\r\n\x1a\n")
         (run / "native-launch.png").write_bytes(screenshot)
         result["actions"].append({"action": "normal-app-launch", "package": PACKAGE, "nativeScreenshot": True})
-        test_class = "com.google.samples.apps.nowinandroid.ui.NavigationTest"
-        command(["./gradlew", ":app:connectedDemoDebugAndroidTest",
-                 "-Pandroid.testInstrumentationRunnerArguments.class=" + test_class,
-                 *gradle_options], "instrumentation.log", timeout=900)
-        result["actions"].append({"action": "native-navigation-tests", "class": test_class})
+        adb("install", "-r", "-t", str(args.apk_dir / "tests.apk"), timeout=60)
+        instrumentation = adb("shell", "pm", "list", "instrumentation")
+        (run / "instrumentation-components.txt").write_bytes(instrumentation)
+        assert TEST_RUNNER.encode() in instrumentation and ("target=" + PACKAGE).encode() in instrumentation
+        command([sdk / "platform-tools" / "adb", "-s", "emulator-5580", "shell", "am", "instrument", "-w", "-r", "--no-window-animation",
+                 "-e", "class", TEST_CLASS, TEST_RUNNER], "instrumentation.log", timeout=900)
+        counts = completed_navigation_tests((run / "instrumentation.log").read_text(encoding="utf-8"))
+        result["actions"].append({"action": "native-navigation-tests", "class": TEST_CLASS, **counts})
         result["nativeAcceptance"] = True
     except BaseException as error:
         result["error"] = str(error)

@@ -1,49 +1,54 @@
 ---
 name: verify-cleartrail
-description: Build and drive the real demo Android app on an isolated hosted emulator, retain native UI evidence and stop only owned processes.
+description: Build the real demo Android APKs, validate their transfer, drive an isolated hosted emulator and preserve native evidence after cleanup.
 ---
 
 # Verify Cleartrail
 
-Status: draft until the hosted baseline completes Launch, Doctor, Drive, Evidence and Cleanup. A successful compile alone is not native acceptance. The current Windows host has no Android SDK or emulator.
+Status: draft. Both APKs and emulator boot have been observed, but normal navigation and the existing instrumentation class have not passed together. The Windows workspace has no configured Android SDK or emulator.
 
 ## Launch
 
-Use the `Cleartrail native checks` workflow on branch `cleartrail`. It runs on an isolated Intel macOS 26 hosted runner with JDK 21 and the preinstalled Android SDK. The maintained driver is `python tools/verify-cleartrail.py <unique-run-name>`. Native device operations are confined to this dedicated hosted test runner, not the user's computer.
+Use the `Cleartrail native checks` workflow on branch `cleartrail`. Its Linux build job runs JDK 21 and the checked-in checksum-pinned Gradle wrapper. Its Intel macOS 26 native job owns a fresh API 30 x86_64 ATD emulator. Device operations are confined to this dedicated hosted runner.
 
-The driver builds only `demoDebug` and its native test APK. It uses the checked-in checksum-pinned Gradle wrapper and existing dependency repositories. It does not publish build scans, accept service terms, change KVM permissions, deploy releases or configure a production backend. SDK installation runs noninteractively; missing accepted SDK licenses are a setup blocker, not consent to accept them automatically.
+The maintained commands are:
+
+```sh
+python -m unittest discover -s tools -p test_verify_cleartrail.py
+python tools/verify-cleartrail.py <unique-build-name> --mode build
+python tools/verify-cleartrail.py <unique-native-name> --mode native --apk-dir <same-run-artifact-directory>
+```
+
+The workflow transfers `app.apk`, `tests.apk` and `manifest.json` through the official artifact actions. The native job requires the successful build job and downloads only that run's named artifact. It checks schema version, source commit, exact file names and SHA-256 hashes before installation. These checks establish integrity within this workflow, not independently signed provenance. A failed native job can be rerun using the successful build artifact without compiling again.
 
 ## Doctor
 
-The driver records actual Java/SDK tools, platform/memory, emulator acceleration preflight, isolated emulator directory and build outcomes. It requires the existing hypervisor to pass `emulator -accel-check` before spending time building; it never changes device permissions, enables a hypervisor or falls back silently to an unaccelerated guest. It refuses existing evidence directories and occupied emulator ports. Emulator readiness is checked through actual boot/package-manager state with a bounded deadline. App readiness requires the real package's visible navigation labels, not an arbitrary startup sleep.
+Record Java, SDK, available memory, source hashes, emulator version and acceleration preflight. Build only `demoDebug` and its native test APK using a 6 GiB Gradle heap, 2 GiB Kotlin heap and three workers. Never autoaccept SDK licenses, change KVM permissions or install a hypervisor. Refuse occupied emulator ports and existing evidence directories.
+
+Create the owned AVD directories and require its index and emulator discovery. Check acceleration after SDK installation and bound actual guest boot/package readiness to 300 seconds. Record the real `CREATE_DOCUMENT` resolver result in `document-picker.json`; its availability is a prerequisite for a future document-export feature, not a baseline requirement.
 
 ## Drive
 
-Install the actual demo APK and launch its MainActivity. Retain a native screenshot and UI hierarchy of the unmodified production demo graph. Run the existing app NavigationTest through the Android instrumentation runner. Those tests drive the real MainActivity with the upstream test graph; distinguish their fixture data from the separate normal-app launch.
+Install the validated app APK and launch its MainActivity without ActivityManager's separate `-W` wait. The driver then requires the real package and visible `Now in Android`, `For you` and `Interests` navigation labels within 90 seconds. Preserve the actual native screenshot and hierarchy of this normal demo graph.
 
-Do not substitute Robolectric component snapshots for emulator execution or infer native iOS coverage from Android. Extend the feature map and native tests when original behavior is added.
+Install the test APK with adb's test-package flag. Confirm the registered component and target, then run the entire unchanged `com.google.samples.apps.nowinandroid.ui.NavigationTest` through its packaged `NiaTestRunner` with `am instrument -w -r --no-window-animation`. The animation flag preserves the existing Gradle convention's `animationsDisabled = true`. See [AGP TestOptions](https://developer.android.com/reference/tools/gradle-api/8.11/com/android/build/api/dsl/TestOptions#animationsDisabled).
+
+Require a completed raw instrumentation protocol with at least 11 tests, no failure or assumption-failure status, and at most the class's one existing ignored test. A zero adb exit code alone is insufficient. The instrumentation tests use the upstream test graph; their fixtures are distinct from the separate normal-app launch.
+
+Do not substitute Robolectric snapshots for emulator execution or infer iOS coverage. Extend the feature map and native tests when original behavior is added.
 
 ## Evidence
 
-The driver retains `result.json`, emulator/build/instrumentation logs, the actual native screenshot and UI hierarchy under ignored `.audit/verification/<run>/`. CI uploads these and native test reports. Download the artifacts and inspect the actual rendered screenshot before marking visual acceptance. Keep generated evidence separate from maintained drivers and source screenshot baselines; upstream requires screenshot baselines to be generated in CI.
+Keep generated data under ignored `.audit/verification/<run>/`. The build phase retains its result, Gradle logs and staged APK manifest. The native phase retains validation results, launch output, hierarchy, screenshot, instrumentation output, emulator logs and bounded failure probes. CI uploads evidence separately from APKs. Download and inspect the actual PNG before accepting the UI. Keep maintained drivers separate from generated evidence. Upstream screenshot baselines remain CI-generated.
 
 ## Cleanup
 
-The driver terminates only its own emulator process group and checks its console port closed. The isolated AVD/profile and all evidence remain in the run directory until the hosted job's normal teardown. It never kills a pre-existing emulator, rewrites device permissions or deletes user profiles. Confirm cleanup in the retained result and that the screenshot survives cleanup.
+Terminate only the owned emulator process group and require its console port to close. Record emulator cleanup and evidence retention in `result.json`. The isolated profile and evidence survive until hosted-job teardown. Never kill a pre-existing emulator or remove user profiles. Confirm the screenshot survives cleanup.
 
-See [the feature map](features/README.md). If SDK, licenses, acceleration or boot are blocked, preserve the precise failed stage and keep this skill a draft while continuing independent authorized work.
+See [the feature map](features/README.md). A missing SDK license, failed acceleration, failed boot, splash-only screen or failed instrumentation keeps acceptance open.
 
-## Hosted build diagnosis
+## Observed baseline
 
-The driver records available memory and uses a6GiB Gradle heap,2GiB Kotlin heap and the upstream CI concurrency floor of3workers. Run39507012126 built the app APK but failed test-APK D8 dexing with heap exhaustion. Lowering workers to2 produced a distinct configuration stall:39508607286 timed out before task execution;39512526139 preserved a daemon thread dump showing nested configuration queues waiting for worker leases. The diagnostic probe was cancelled after capture and did not retain final JSON, so normal cleanup is not claimed for it.
+[Run 39513191318](https://github.com/STEVVVU/cleartrail-android/actions/runs/39513191318) completed both APK builds after restoring three workers. Earlier two-worker configuration stalled; lowering concurrency is not assumed safe here. Later probes separately established AVD discovery and Hypervisor.Framework preflight. Acceleration alone did not establish boot readiness.
 
-Restoring3workers with the same heap caps completed both APK builds on [39513191318](https://github.com/STEVVVU/cleartrail-android/actions/runs/39513191318),654tasks in7m48s. This clears the observed build gate, not native acceptance. Existing upstream warnings remain visible; the driver disables no product checks.
-
-That run then failed before boot: the emulator could not discover its AVD index. The owned ANDROID_AVD_HOME directory had not been created before avdmanager. The driver now creates the owned directories and requires both the expected index file and emulator discovery before launch. This behavior is also documented in the [Web Platform Tests Android driver](https://chromium.googlesource.com/external/github.com/web-platform-tests/wpt/+/refs/tags/merge_pr_61730/tools/wpt/android.py). See Android's [environment variable reference](https://developer.android.com/tools/variables) for discovery paths. The current native rerun must still prove boot, actual UI, instrumentation and cleanup. KVM access remains unchanged.
-
-Run [39514321709](https://github.com/STEVVVU/cleartrail-android/actions/runs/39514321709) completed both APK builds and passed owned AVD index/discovery, confirming that setup correction. Its unaccelerated Linux guest did not reach boot/package readiness within 300 seconds. Both cleanup flags passed. No native screenshot or instrumentation result was obtained. Logs show TCG emulation and inaccessible KVM; they do not prove that more time alone would complete boot.
-
-The next probe uses the standard `macos-26-intel` runner, retaining the same x86_64 system image and heap/worker settings. [GitHub's runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners) lists that Intel runner; its Apple Silicon runner has a documented nested-virtualization limitation, so it is not used for Android. [Android's acceleration guide](https://developer.android.com/studio/run/emulator-acceleration) describes the built-in macOS Hypervisor.Framework and `-accel-check`. This is a source-qualified alternative, not a guarantee the hosted preflight will pass. The actual probe decides acceptance. No HAXM install, privilege escalation, SDK-license acceptance or KVM change is added. The last boot readiness/error probe is retained as JSON.
-
-
-The Intel probe [39516409568](https://github.com/STEVVVU/cleartrail-android/actions/runs/39516409568) passed Hypervisor.Framework preflight and both APK builds, but the API30 ATD guest still did not set boot-completed within300seconds. Final getprop was empty. Cleanup and evidence retention passed. This contradicts the premise that available host acceleration alone resolves startup. The next driver boots before compiling and retains kernel/guest logs plus bounded failure-only ADB property/process/log/screen probes. It checks acceleration again after SDK installation so the installed emulator is the one checked. These diagnostics do not change the readiness gate or claim the cause. See [Android emulator command-line diagnostics](https://developer.android.com/studio/run/emulator-commandline). No original Android product code has been added.
+[Run 39519290354](https://github.com/STEVVVU/cleartrail-android/actions/runs/39519290354) booted the guest, built both APKs and installed the app. `am start -W` returned `Status: timeout` while the retained PNG showed the splash screen. The driver aborted before its own UI-readiness gate. No completed navigation or instrumentation is claimed. Cleanup and evidence retention passed. The separate build/native workflow and non-waiting launch are corrections awaiting hosted proof. No original Kotlin product feature has been added.
