@@ -21,7 +21,7 @@ Use JDK 21 and the checked-in Gradle wrapper.
 
 Run `python -m unittest discover -s tools -p test_verify_cleartrail.py` for the verifier's platform and artifact-boundary tests. The native emulator workflow is an optional manual dispatch. A successful build or an unrun emulator job does not prove document-provider behavior or native screen acceptance.
 
-Current local checks pass the 11 Python verifier tests. Android compilation, Kotlin tests and lint await the hosted run. The Room upgrade/reopen test sources are included in the database instrumentation APK build, but their execution and the real document-provider flow remain unverified.
+The 11 Python verifier tests pass locally. [Hosted verification](https://github.com/STEVVVU/cleartrail-android/actions/runs/39543402892) at `96b11db5` passed all 49 scoped unit tests, including 10 new repository and consent-session tests, lint, and both app and instrumentation APK builds. Downloaded APK hashes match the uploaded source-commit manifest, and the generated Room schema matches the checked-in snapshot. Lint retains 27 inherited warnings. The Room upgrade/reopen test sources compile in the database instrumentation APK, but their execution and the real document-provider flow remain unverified.
 
 ## Architecture
 
