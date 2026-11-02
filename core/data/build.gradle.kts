@@ -22,6 +22,7 @@ plugins {
 
 android {
     namespace = "com.google.samples.apps.nowinandroid.core.data"
+    defaultConfig.testInstrumentationRunner = "com.google.samples.apps.nowinandroid.core.data.repository.RepositoryTestRunner"
     testOptions.unitTests.isIncludeAndroidResources = true
 }
 
@@ -39,4 +40,9 @@ dependencies {
     testImplementation(libs.kotlinx.serialization.json)
     testImplementation(projects.core.datastoreTest)
     testImplementation(projects.core.testing)
+
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.hilt.android.testing)
+    kspAndroidTest(libs.hilt.compiler)
 }
