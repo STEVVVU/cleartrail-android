@@ -193,6 +193,13 @@ def completed_tests(output, minimum, max_ignored=0):
     return {"completedTests": int(count[1]), "ignoredTests": ignored}
 
 
+def document_picker_available(probe):
+    return probe.get("returncode") == 0 and any(
+        re.fullmatch(r"[A-Za-z0-9_.$]+/[A-Za-z0-9_.$]+", line.strip())
+        for line in probe.get("stdout", "").splitlines()
+    )
+
+
 def listening(port):
     with socket.socket() as connection:
         connection.settimeout(0.2)
@@ -381,7 +388,7 @@ def main():
         command([sdk / "emulator" / "emulator", "-accel-check"], "acceleration.log", timeout=30)
         result["actions"].append({"action": "doctor", "compileSdk": 36, "platform": platform.system(),
                                   "architecture": platform.machine(), "accelerationPreflightPassed": True})
-        image = "system-images;android-30;aosp_atd;x86_64"
+        image = "system-images;android-30;default;x86_64"
         command([sdkmanager, "emulator", image], "sdk.log", timeout=300)
         command([sdk / "emulator" / "emulator", "-version"], "emulator-version.log", timeout=15)
         command([sdk / "emulator" / "emulator", "-accel-check"], "acceleration-after-install.log", timeout=30)
@@ -445,6 +452,9 @@ def main():
         except (OSError, subprocess.TimeoutExpired) as picker_error:
             picker_probe = {"error": str(picker_error)}
         (run / "document-picker.json").write_text(json.dumps(picker_probe, indent=2), encoding="utf-8")
+        if not document_picker_available(picker_probe):
+            raise RuntimeError("A real CREATE_DOCUMENT activity is required. Inspect document-picker.json.")
+        result["actions"].append({"action": "resolve-document-picker", "available": True})
         for name in ("app.apk", "tests.apk", "room-tests.apk", "data-tests.apk"):
             remaining = native_deadline - time.monotonic()
             if remaining <= 0:

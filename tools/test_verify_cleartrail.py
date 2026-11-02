@@ -240,5 +240,21 @@ class InstrumentationBoundaryTests(unittest.TestCase):
             verifier.completed_tests("INSTRUMENTATION_STATUS_CODE: -3\nOK (1 test)\nINSTRUMENTATION_CODE: -1\n", 1)
 
 
+class PickerBoundaryTests(unittest.TestCase):
+    def test_real_resolved_component_is_required(self):
+        for probe in (
+            {"returncode": 0, "stdout": "No activity found\n"},
+            {"returncode": 1, "stdout": "com.android.documentsui/.picker.PickActivity\n"},
+            {"error": "timed out"},
+            {"returncode": 0, "stdout": ""},
+        ):
+            with self.subTest(probe=probe):
+                self.assertFalse(verifier.document_picker_available(probe))
+        self.assertTrue(verifier.document_picker_available({
+            "returncode": 0,
+            "stdout": "priority=0 preferredOrder=0\ncom.android.documentsui/.picker.PickActivity\n",
+        }))
+
+
 if __name__ == "__main__":
     unittest.main()
