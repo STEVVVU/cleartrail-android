@@ -256,5 +256,21 @@ class PickerBoundaryTests(unittest.TestCase):
         }))
 
 
+class KvmPreflightTests(unittest.TestCase):
+    def test_missing_device_is_reported_without_changing_permissions(self):
+        with tempfile.TemporaryDirectory(prefix="cleartrail-kvm-tests-") as scratch:
+            result = verifier.kvm_preflight(Path(scratch) / "missing-kvm")
+        self.assertFalse(result["readable"])
+        self.assertFalse(result["writable"])
+        self.assertIn("error", result)
+
+    def test_regular_file_is_not_a_kvm_device(self):
+        with tempfile.TemporaryDirectory(prefix="cleartrail-kvm-tests-") as scratch:
+            path = Path(scratch) / "not-kvm"
+            path.write_bytes(b"")
+            result = verifier.kvm_preflight(path)
+        self.assertFalse(result["characterDevice"])
+
+
 if __name__ == "__main__":
     unittest.main()

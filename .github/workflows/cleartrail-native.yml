@@ -54,7 +54,7 @@ jobs:
   native-baseline:
     if: github.event_name == 'workflow_dispatch' && inputs.native
     needs: build
-    runs-on: macos-26-intel
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4

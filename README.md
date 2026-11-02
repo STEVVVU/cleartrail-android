@@ -15,13 +15,15 @@ This is a bounded, cooperative data-flow example inspired by explicit labels in 
 Use JDK 21 and the checked-in Gradle wrapper.
 
 ```sh
-./gradlew :app:assembleDemoDebug :app:assembleDemoDebugAndroidTest :core:database:assembleDemoDebugAndroidTest
+./gradlew :app:assembleDemoDebug :app:assembleDemoDebugAndroidTest :core:database:assembleDemoDebugAndroidTest :core:data:assembleDemoDebugAndroidTest
 ./gradlew :core:data:testDemoDebugUnitTest :feature:bookmarks:impl:testDemoDebugUnitTest :feature:bookmarks:impl:lintDemoDebug
 ```
 
 Run `python -m unittest discover -s tools -p test_verify_cleartrail.py` for the verifier's platform and artifact-boundary tests. The native emulator workflow is an optional manual dispatch. A successful build or an unrun emulator job does not prove document-provider behavior or native screen acceptance.
 
-The 11 Python verifier tests pass locally. [Hosted verification](https://github.com/STEVVVU/cleartrail-android/actions/runs/39543402892) at `96b11db5` passed all 49 scoped unit tests, including 10 new repository and consent-session tests, lint, and both app and instrumentation APK builds. Downloaded APK hashes match the uploaded source-commit manifest, and the generated Room schema matches the checked-in snapshot. Lint retains 27 inherited warnings. The Room upgrade/reopen test sources compile in the database instrumentation APK, but their execution and the real document-provider flow remain unverified.
+The 23 Python verifier tests pass locally. [Run 41417601001](https://github.com/STEVVVU/cleartrail-android/actions/runs/41417601001) at `bef5675d` compiled the app and three instrumentation APKs, passed all 49 scoped unit tests with no skips, and passed lint with 27 inherited warnings. Downloaded APK hashes match the source-commit manifest. All four installed within their unchanged 60-second bounds. The existing navigation suite passed 11 tests; one additional test remained ignored as it was upstream.
+
+That ATD run failed the original reading-brief journey with `ActivityNotFoundException`: no real `CREATE_DOCUMENT` activity resolved, and the retained screenshots were black. [ATDs disable hardware rendering](https://developer.android.com/studio/test/managed-devices#use-automated-test-devices). The maintained driver now requires a standard AOSP image, an actual document picker and nonblack screenshots. Export, Room migration/reopen and cross-process repository acceptance remain unverified pending the complete native run. Earlier build evidence, including [39543402892](https://github.com/STEVVVU/cleartrail-android/actions/runs/39543402892), remains separate.
 
 ## Architecture
 

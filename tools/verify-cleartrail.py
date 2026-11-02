@@ -11,6 +11,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -200,6 +201,17 @@ def document_picker_available(probe):
     )
 
 
+def kvm_preflight(path):
+    result = {"path": str(path), "readable": os.access(path, os.R_OK), "writable": os.access(path, os.W_OK)}
+    try:
+        details = path.stat()
+        result.update({"characterDevice": stat.S_ISCHR(details.st_mode), "mode": oct(stat.S_IMODE(details.st_mode)),
+                       "uid": details.st_uid, "gid": details.st_gid})
+    except OSError as error:
+        result["error"] = str(error)
+    return result
+
+
 def listening(port):
     with socket.socket() as connection:
         connection.settimeout(0.2)
@@ -380,6 +392,12 @@ def main():
             return
         manifest = validated_apks(args.apk_dir, os.environ["GITHUB_SHA"])
         result["actions"].append({"action": "validate-build-artifact", "manifest": manifest})
+        if platform.system() == "Linux":
+            kvm = kvm_preflight(Path("/dev/kvm"))
+            kvm["hostCpuCount"] = os.cpu_count()
+            (run / "kvm-preflight.json").write_text(json.dumps(kvm, indent=2), encoding="utf-8")
+            if not (kvm.get("characterDevice") and kvm["readable"] and kvm["writable"]):
+                raise RuntimeError("Existing /dev/kvm access is required. Inspect kvm-preflight.json.")
         assert (sdk / "platform-tools" / "adb").is_file(), "Preinstalled Android platform-tools required."
         sdkmanager = sdk / "cmdline-tools" / "latest" / "bin" / "sdkmanager"
         avdmanager = sdk / "cmdline-tools" / "latest" / "bin" / "avdmanager"
@@ -405,7 +423,7 @@ def main():
         assert avd in (run / "avd-list.log").read_text(encoding="utf-8").splitlines(), "Emulator cannot discover the owned AVD."
         emulator = subprocess.Popen([str(sdk / "emulator" / "emulator"), "-avd", avd, "-port", "5580",
                                      "-no-window", "-no-audio", "-no-snapshot", "-gpu", "swiftshader_indirect",
-                                     "-camera-back", "none", "-camera-front", "none", "-memory", "2048",
+                                     "-camera-back", "none", "-camera-front", "none", "-memory", "2048", "-cores", "2",
                                      "-accel", "on", "-show-kernel", "-logcat", "*:W", "-no-metrics"],
                                     env=env, cwd=ROOT, stdout=emulator_log, stderr=subprocess.STDOUT,
                                     start_new_session=True)
@@ -442,6 +460,9 @@ def main():
         else:
             raise TimeoutError("Owned emulator did not complete boot within 900 seconds.")
         result["actions"].append({"action": "boot", "api": 30, "elapsedSeconds": round(time.monotonic() - boot_started, 3)})
+        guest_cpus = adb("shell", "cat", "/sys/devices/system/cpu/online").decode().strip()
+        (run / "guest-cpu-online.txt").write_text(guest_cpus + "\n", encoding="utf-8")
+        result["actions"].append({"action": "guest-cpu-online", "requestedCores": 2, "online": guest_cpus})
         try:
             picker = subprocess.run([str(sdk / "platform-tools" / "adb"), "-s", "emulator-5580", "shell", "cmd", "package",
                                      "resolve-activity", "--brief", "-a", "android.intent.action.CREATE_DOCUMENT",
@@ -538,6 +559,7 @@ def main():
                 ("devices", ["devices", "-l"]),
                 ("properties", ["-s", "emulator-5580", "shell", "getprop"]),
                 ("processes", ["-s", "emulator-5580", "shell", "ps", "-A"]),
+                ("cpu-online", ["-s", "emulator-5580", "shell", "cat", "/sys/devices/system/cpu/online"]),
                 ("logcat", ["-s", "emulator-5580", "logcat", "-d", "-t", "200"]),
                 ("hierarchy", ["-s", "emulator-5580", "exec-out", "uiautomator", "dump", "/dev/tty"]),
                 ("screen", ["-s", "emulator-5580", "exec-out", "screencap", "-p"]),
