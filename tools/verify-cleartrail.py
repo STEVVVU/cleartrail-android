@@ -11,9 +11,11 @@ import re
 import shutil
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import time
+import zlib
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,9 +23,75 @@ PACKAGE = "com.google.samples.apps.nowinandroid.demo.debug"
 TEST_CLASS = "com.google.samples.apps.nowinandroid.ui.NavigationTest"
 TEST_RUNNER = PACKAGE + ".test/com.google.samples.apps.nowinandroid.core.testing.NiaTestRunner"
 NATIVE_PNGS = ("native-launch.png", "brief-picker.png", "brief-preview.png", "brief-invalidated.png", "brief-saved.png")
-NATIVE_FILES = ("launch-ui.xml", "instrumentation.log", "brief-instrumentation.log", "brief-captures.json",
+NATIVE_FILES = ("launch-ui.xml", "install-events.jsonl", "instrumentation.log", "brief-instrumentation.log", "brief-captures.json",
                 "room-instrumentation-0.log", "room-instrumentation-1.log", "data-writeDraft.log",
                 "data-readDraftAfterProcessRestart.log", "brief-expected.json", "brief-provider.json")
+
+
+def visible_screenshot(path):
+    try:
+        data = path.read_bytes()
+        if data[:8] != b"\x89PNG\r\n\x1a\n":
+            return False
+        offset, chunks, header = 8, [], None
+        while offset + 12 <= len(data):
+            size = struct.unpack_from(">I", data, offset)[0]
+            kind = data[offset + 4:offset + 8]
+            end = offset + 12 + size
+            if end > len(data):
+                return False
+            payload = data[offset + 8:offset + 8 + size]
+            if kind == b"IHDR":
+                header = struct.unpack(">IIBBBBB", payload)
+            elif kind == b"IDAT":
+                chunks.append(payload)
+            elif kind == b"IEND":
+                break
+            offset = end
+        if header is None or kind != b"IEND":
+            return False
+        width, height, depth, color, compression, filtering, interlace = header
+        channels = {2: 3, 6: 4}.get(color)
+        if not channels or depth != 8 or compression or filtering or interlace or not width or not height:
+            return False
+        stride = width * channels
+        expected_size = (stride + 1) * height
+        if expected_size > 64 * 1024 * 1024:
+            return False
+        decoder = zlib.decompressobj()
+        raw = decoder.decompress(b"".join(chunks), expected_size + 1)
+        if len(raw) != expected_size or not decoder.eof:
+            return False
+        previous = bytearray(stride)
+        visible = False
+        for row in range(height):
+            start = row * (stride + 1)
+            method = raw[start]
+            current = bytearray(raw[start + 1:start + 1 + stride])
+            if method > 4:
+                return False
+            if method:
+                for i in range(stride):
+                    left = current[i - channels] if i >= channels else 0
+                    above = previous[i]
+                    upper_left = previous[i - channels] if i >= channels else 0
+                    if method == 1:
+                        predictor = left
+                    elif method == 2:
+                        predictor = above
+                    elif method == 3:
+                        predictor = (left + above) // 2
+                    else:
+                        p = left + above - upper_left
+                        distances = (abs(p - left), abs(p - above), abs(p - upper_left))
+                        predictor = (left, above, upper_left)[distances.index(min(distances))]
+                    current[i] = (current[i] + predictor) & 255
+            if not visible:
+                visible = any(current[0::channels]) or any(current[1::channels]) or any(current[2::channels])
+            previous = current
+        return visible
+    except (OSError, ValueError, struct.error, zlib.error):
+        return False
 
 
 def finalize_native_receipt(result, run, checks_passed, emulator_stopped, cleanup_error=None):
@@ -38,11 +106,7 @@ def finalize_native_receipt(result, run, checks_passed, emulator_stopped, cleanu
             missing.append(name)
     for name in NATIVE_PNGS:
         path = run / name
-        try:
-            retained = path.is_file() and path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-        except OSError:
-            retained = False
-        if not retained:
+        if not visible_screenshot(path):
             missing.append(name)
     expected, provider = run / "brief-expected.json", run / "brief-provider.json"
     try:
@@ -63,6 +127,27 @@ def append_json_record(path, record):
     with path.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(record) + "\n")
         stream.flush()
+
+
+def install_apk(adb_path, apk, is_test, env, receipt, timeout):
+    argv = [str(adb_path), "-s", "emulator-5580", "install", "-r"]
+    if is_test:
+        argv.append("-t")
+    argv.append(str(apk))
+    started = time.monotonic()
+    append_json_record(receipt, {"apk": apk.name, "event": "started", "argv": argv, "timeoutSeconds": timeout})
+    try:
+        completed = subprocess.run(argv, env=env, capture_output=True, timeout=timeout, check=True)
+        append_json_record(receipt, {"apk": apk.name, "event": "completed", "returncode": completed.returncode,
+                                     "elapsedSeconds": round(time.monotonic() - started, 3),
+                                     "stdout": completed.stdout.decode(errors="replace"), "stderr": completed.stderr.decode(errors="replace")})
+    except (OSError, subprocess.SubprocessError) as error:
+        stdout, stderr = getattr(error, "stdout", None), getattr(error, "stderr", None)
+        append_json_record(receipt, {"apk": apk.name, "event": "failed", "error": str(error),
+                                     "elapsedSeconds": round(time.monotonic() - started, 3),
+                                     "stdout": stdout.decode(errors="replace") if stdout else "",
+                                     "stderr": stderr.decode(errors="replace") if stderr else ""})
+        raise
 
 
 def write_and_close_stdin(process, input_text):
@@ -360,8 +445,13 @@ def main():
         except (OSError, subprocess.TimeoutExpired) as picker_error:
             picker_probe = {"error": str(picker_error)}
         (run / "document-picker.json").write_text(json.dumps(picker_probe, indent=2), encoding="utf-8")
-        apk = args.apk_dir / "app.apk"
-        adb("install", "-r", str(apk), timeout=60)
+        for name in ("app.apk", "tests.apk", "room-tests.apk", "data-tests.apk"):
+            remaining = native_deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Native execution exceeded its 1800-second budget.")
+            install_apk(sdk / "platform-tools" / "adb", args.apk_dir / name, name != "app.apk", env,
+                        run / "install-events.jsonl", min(60, remaining))
+            result["actions"].append({"action": "install-apk", "apk": name})
         launch = adb("shell", "am", "start", "-n", PACKAGE + "/com.google.samples.apps.nowinandroid.MainActivity", timeout=30)
         (run / "launch.txt").write_bytes(launch)
         assert b"Error" not in launch, "ActivityManager rejected the MainActivity launch. Inspect launch.txt."
@@ -379,7 +469,6 @@ def main():
         assert screenshot.startswith(b"\x89PNG\r\n\x1a\n")
         (run / "native-launch.png").write_bytes(screenshot)
         result["actions"].append({"action": "normal-app-launch", "package": PACKAGE, "nativeScreenshot": True})
-        adb("install", "-r", "-t", str(args.apk_dir / "tests.apk"), timeout=60)
         instrumentation = adb("shell", "pm", "list", "instrumentation")
         (run / "instrumentation-components.txt").write_bytes(instrumentation)
         assert TEST_RUNNER.encode() in instrumentation and ("target=" + PACKAGE).encode() in instrumentation
@@ -399,7 +488,6 @@ def main():
         for name in ("picker.png", "preview.png", "invalidated.png", "saved.png"):
             assert (run / ("brief-" + name)).read_bytes().startswith(b"\x89PNG\r\n\x1a\n"), "Missing native brief screenshot."
         result["actions"].append({"action": "native-brief-export", "class": brief_class, "sha256": hashlib.sha256(actual).hexdigest(), **counts})
-        adb("install", "-r", "-t", str(args.apk_dir / "room-tests.apk"), timeout=60)
         instrumentation = adb("shell", "pm", "list", "instrumentation").decode()
         (run / "room-instrumentation-components.txt").write_text(instrumentation, encoding="utf-8")
         room_runners = re.findall(r"^instrumentation:(\S+/androidx\.test\.runner\.AndroidJUnitRunner) \(target=(\S+)\)\r?$", instrumentation, re.MULTILINE)
@@ -413,7 +501,6 @@ def main():
             command([sdk / "platform-tools" / "adb", "-s", "emulator-5580", "shell", "am", "instrument", "-w", "-r", "--no-window-animation", "-e", "class", room_class, room_runner], log, timeout=900)
             counts = completed_tests((run / log).read_text(encoding="utf-8"), 1)
             result["actions"].append({"action": "native-room-test", "class": room_class, **counts})
-        adb("install", "-r", "-t", str(args.apk_dir / "data-tests.apk"), timeout=60)
         instrumentation = adb("shell", "pm", "list", "instrumentation").decode()
         (run / "data-instrumentation-components.txt").write_text(instrumentation, encoding="utf-8")
         data_runners = re.findall(r"^instrumentation:(\S+/com\.google\.samples\.apps\.nowinandroid\.core\.data\.repository\.RepositoryTestRunner) \(target=(\S+)\)\r?$", instrumentation, re.MULTILINE)

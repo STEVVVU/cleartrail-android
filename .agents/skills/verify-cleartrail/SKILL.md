@@ -33,9 +33,9 @@ Native execution has an overall 1,800-second budget inside the 40-minute job. In
 
 ## Drive
 
-Install the validated app APK and launch its MainActivity without ActivityManager's separate `-W` wait. The driver then requires the real package and visible `Now in Android`, `For you` and `Interests` navigation labels within 90 seconds. Preserve the actual native screenshot and hierarchy of this normal demo graph.
+Install all four validated APKs before starting the app, with `-t` for test packages. `install-events.jsonl` retains each install's start, elapsed time, output and failure; each remains subject to its 60-second upper bound. Launch MainActivity without ActivityManager's separate `-W` wait. The driver then requires the real package and `Now in Android`, `For you` and `Interests` navigation labels within 90 seconds. Preserve the actual native screenshot and hierarchy of this normal demo graph.
 
-Install the test APK with adb's test-package flag. Confirm the registered component and target, then run the entire unchanged `com.google.samples.apps.nowinandroid.ui.NavigationTest` through its packaged `NiaTestRunner` with `am instrument -w -r --no-window-animation`. The animation flag preserves the existing Gradle convention's `animationsDisabled = true`. See [AGP TestOptions](https://developer.android.com/reference/tools/gradle-api/8.11/com/android/build/api/dsl/TestOptions#animationsDisabled).
+Confirm the installed test APK's registered component and target, then run the entire unchanged `com.google.samples.apps.nowinandroid.ui.NavigationTest` through its packaged `NiaTestRunner` with `am instrument -w -r --no-window-animation`. The animation flag preserves the existing Gradle convention's `animationsDisabled = true`. See [AGP TestOptions](https://developer.android.com/reference/tools/gradle-api/8.11/com/android/build/api/dsl/TestOptions#animationsDisabled).
 
 Require a completed raw instrumentation protocol with at least 11 tests, no failure or assumption-failure status, and at most the class's one existing ignored test. A zero adb exit code alone is insufficient. The instrumentation tests use the upstream test graph; their fixtures are distinct from the separate normal-app launch.
 
@@ -49,7 +49,7 @@ Keep generated data under ignored `.audit/verification/<run>/`. The build phase 
 
 ## Cleanup
 
-Terminate only the owned emulator process group and require its console port to close. Record emulator cleanup and evidence retention in `result.json`. Native acceptance requires successful cleanup and retained native screenshots, instrumentation logs and matching provider and preview bytes after cleanup. Cleanup errors are recorded separately from any primary failure. The isolated profile and evidence survive until hosted-job teardown. Never kill a pre-existing emulator or remove user profiles. Confirm the screenshot survives cleanup.
+Terminate only the owned emulator process group and require its console port to close. Record emulator cleanup and evidence retention in `result.json`. Native acceptance requires successful cleanup and retained native screenshots, instrumentation logs and matching provider and preview bytes after cleanup. Screenshots must decode as supported 8-bit RGB or RGBA PNGs and contain nonblack pixels; this is a blank-frame guard, not a substitute for visual inspection. Cleanup errors are recorded separately from any primary failure. The isolated profile and evidence survive until hosted-job teardown. Never kill a pre-existing emulator or remove user profiles. Confirm the screenshot survives cleanup.
 
 See [the feature map](features/README.md). A missing SDK license, failed acceleration, failed boot, splash-only screen or failed instrumentation keeps acceptance open.
 
@@ -58,6 +58,8 @@ See [the feature map](features/README.md). A missing SDK license, failed acceler
 [Run 39543402892](https://github.com/STEVVVU/cleartrail-android/actions/runs/39543402892) at `96b11db5` passed 11 verifier boundary tests, 49 scoped unit tests, feature lint without errors, database instrumentation compilation, and both app APK builds. The main agent downloaded both APKs, matched their SHA-256 values to the exact source-commit manifest, inspected test and lint XML, and compared the generated Room schema 15 to the checked-in snapshot. Lint retains 27 inherited warnings. `buildAccepted` is true, `nativeAcceptance` is false, and evidence retention passed. The optional emulator job was skipped under the user's code-delivery scope. Real UI, document-provider writes and Room migration execution remain unverified.
 
 ## Observed baseline
+
+[Run 41413512619](https://github.com/STEVVVU/cleartrail-android/actions/runs/41413512619) at `f162d6b4` compiled all four APKs and reached the normal-app navigation hierarchy after a 352.384-second boot. The app test APK installation timed out after 60 seconds while the app was foregrounded. Retained process and logcat probes show dex2oat running and app startup work; they do not establish the timeout's cause or an adb streaming failure. Both retained screenshots are solid black, so the hierarchy does not prove visible rendering. Installing before launch is a bounded contention experiment, not a confirmed fix. Native tests, provider bytes and visible screenshots remain unverified.
 
 [Run 39513191318](https://github.com/STEVVVU/cleartrail-android/actions/runs/39513191318) completed both APK builds after restoring three workers. Earlier two-worker configuration stalled; lowering concurrency is not assumed safe here. Later probes separately established AVD discovery and Hypervisor.Framework preflight. Acceleration alone did not establish boot readiness.
 
