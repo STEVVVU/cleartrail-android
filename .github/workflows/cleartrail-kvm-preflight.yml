@@ -1,0 +1,47 @@
+name: Cleartrail read-only KVM preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Record existing KVM access
+        run: |
+          mkdir -p .audit/kvm-preflight
+          id > .audit/kvm-preflight/identity.log
+          uname -a > .audit/kvm-preflight/host.log
+          python - <<'PY'
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          spec = importlib.util.spec_from_file_location("verify_cleartrail", "tools/verify-cleartrail.py")
+          driver = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(driver)
+          result = driver.kvm_preflight(Path("/dev/kvm"))
+          result["hostCpuCount"] = os.cpu_count()
+          Path(".audit/kvm-preflight/kvm-preflight.json").write_text(json.dumps(result, indent=2) + "\n")
+          print(json.dumps(result))
+          PY
+          test -c /dev/kvm && test -r /dev/kvm && test -w /dev/kvm
+      - name: Check preinstalled emulator acceleration
+        run: |
+          test -f "$ANDROID_HOME/emulator/emulator"
+          timeout 30 "$ANDROID_HOME/emulator/emulator" -accel-check 2>&1 | tee .audit/kvm-preflight/acceleration.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cleartrail-kvm-preflight
+          path: .audit/kvm-preflight/*
+          if-no-files-found: error
+          retention-days: 7
